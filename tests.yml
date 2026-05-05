@@ -1,0 +1,386 @@
+# AGENTS.md
+
+## Project name
+
+HER2-DISH Counter
+
+## Project purpose
+
+This project is a research-use desktop application to support HER2-DISH signal counting on 40x objective microscopic images.
+
+The application is intended to assist pathologists by recording and calculating HER2-DISH counts. It must not be presented as a standalone diagnostic device. Final interpretation must always be performed by a qualified pathologist.
+
+## Clinical / research disclaimer
+
+- This software is for research, education, and counting support only.
+- This software must not make an autonomous clinical diagnosis.
+- All final HER2 interpretation must be reviewed and approved by a pathologist.
+- All outputs must include the statement:
+
+> Research-use counting support tool. Final diagnosis and interpretation must be performed by a pathologist.
+
+## Target image
+
+- Bright-field HER2-DISH images.
+- Images are captured using a 40x objective lens.
+- Whole-slide image support is not required for the first version.
+- Supported initial formats: jpg, jpeg, png, tif, tiff.
+
+## Current development strategy
+
+The first version must prioritize reliable manual/semi-manual workflow over full automation.
+
+Do **not** implement full automatic nuclear segmentation in v0.1.
+
+The application should first support:
+
+1. Opening a 40x HER2-DISH image.
+2. Zooming and panning the image.
+3. Drawing ROI on the application.
+4. Manually clicking tumor nuclei.
+5. Assigning a nucleus number to each clicked nucleus.
+6. Entering HER2 black signal count and CEP17 red signal count for each nucleus.
+7. Allowing cluster correction.
+8. Marking nuclei as included or excluded.
+9. Calculating HER2/CEP17 ratio and average HER2 copy number.
+10. Classifying the result into ASCO/CAP dual-probe ISH Groups 1-5.
+11. Exporting JSON, CSV, and annotated PNG.
+
+## Why full automatic nuclear segmentation is not the first goal
+
+Previous ImageJ/Fiji macro-based attempts had difficulty with nuclear segmentation in HER2-DISH images.
+
+Common problems:
+
+- Nuclear borders are often unclear.
+- Tumor nuclei are frequently crowded or overlapping.
+- Black and red DISH signals may be misrecognized as small nuclei.
+- Non-tumor cells may be included if nuclear detection is fully automatic.
+- HER2 clusters require manual or semi-manual interpretation.
+- Background dust or red haze can cause false-positive dot detection.
+
+Therefore, in v0.1, nuclear selection must be manual. The first reliable goal is not full automation, but accurate recording, correction, calculation, and export.
+
+## Recommended technology stack
+
+Use Python.
+
+Required:
+
+- GUI: PySide6
+- Image handling: Pillow, OpenCV, NumPy
+- Data handling: pandas
+- Export: CSV, JSON, annotated PNG
+- Testing: pytest
+
+Optional for later versions:
+
+- scikit-image
+- reportlab for PDF reports
+- openpyxl for Excel export
+- Cellpose or other segmentation models for future nuclear candidate detection
+
+Do not include Cellpose, StarDist, SAM, PyTorch, or other heavy AI dependencies in v0.1 unless explicitly requested.
+
+## Repository structure
+
+Use and preserve the following structure as much as possible:
+
+```text
+her2_dish_counter/
+├─ AGENTS.md
+├─ README.md
+├─ requirements.txt
+├─ pyproject.toml
+├─ codex_initial_task.md
+├─ src/
+│  └─ her2dish/
+│     ├─ __init__.py
+│     ├─ main.py
+│     ├─ app.py
+│     ├─ ui/
+│     │  ├─ __init__.py
+│     │  ├─ main_window.py
+│     │  ├─ image_viewer.py
+│     │  ├─ roi_tools.py
+│     │  └─ count_panel.py
+│     ├─ core/
+│     │  ├─ __init__.py
+│     │  ├─ constants.py
+│     │  ├─ models.py
+│     │  ├─ scoring.py
+│     │  ├─ roi.py
+│     │  ├─ export.py
+│     │  └─ project_io.py
+│     └─ resources/
+├─ tests/
+│  ├─ test_scoring.py
+│  └─ test_project_io.py
+└─ sample_data/
+   └─ README.md
+```
+
+## Core scoring rules
+
+Only included nuclei should be used for calculation.
+
+For each included nucleus:
+
+```text
+effective HER2 count = her2_black + cluster_value
+CEP17 count = cep17_red
+```
+
+Calculate:
+
+```text
+cell_count = number of included nuclei
+total_her2 = sum of effective HER2 counts
+total_cep17 = sum of CEP17 red counts
+HER2/CEP17 ratio = total_her2 / total_cep17
+average HER2 copy number = total_her2 / cell_count
+```
+
+If total CEP17 is zero, the case is not evaluable.
+
+## ASCO/CAP dual-probe ISH group classification
+
+Implement:
+
+```text
+Group 1: HER2/CEP17 ratio >= 2.0 and average HER2 copy number >= 4.0
+Group 2: HER2/CEP17 ratio >= 2.0 and average HER2 copy number < 4.0
+Group 3: HER2/CEP17 ratio < 2.0 and average HER2 copy number >= 6.0
+Group 4: HER2/CEP17 ratio < 2.0 and average HER2 copy number >= 4.0 and < 6.0
+Group 5: HER2/CEP17 ratio < 2.0 and average HER2 copy number < 4.0
+```
+
+For Groups 2-4, display a warning:
+
+```text
+This result requires additional evaluation with IHC correlation and/or pathologist review according to the laboratory workflow.
+```
+
+## Additional counting alert
+
+If HER2/CEP17 ratio is between 1.8 and 2.2 inclusive, display:
+
+```text
+Borderline HER2/CEP17 ratio. Consider counting an additional 20 nuclei according to the laboratory workflow.
+```
+
+## v0.1 required features
+
+### Image viewer
+
+- Open jpg, jpeg, png, tif, tiff.
+- Display the image.
+- Support zoom.
+- Support pan.
+- Keep annotations aligned with the image during zoom and pan.
+
+### ROI
+
+- Allow the user to draw at least rectangular ROI.
+- Polygon ROI is preferred if feasible.
+- ROI should be visible as an overlay.
+- ROI coordinates must be saved in the project JSON.
+
+### Nucleus registration
+
+- User can click on the image to add a nucleus.
+- Each nucleus receives a unique number.
+- Display nucleus number next to the clicked position.
+- Draw an ellipse or circle around the registered nucleus.
+- Nucleus position must be stored in image coordinates, not screen coordinates.
+- The user can select a nucleus from the image or table.
+- The user can delete a nucleus.
+- The user can mark a nucleus as included or excluded.
+
+### Count table
+
+Create an editable table with columns:
+
+- nucleus_id
+- included
+- x
+- y
+- HER2 black
+- CEP17 red
+- cluster value
+- cluster note
+- comment
+
+Editing the table should update the calculation immediately.
+
+### Calculation panel
+
+Display:
+
+- Included nucleus count
+- Total HER2 count
+- Total CEP17 count
+- HER2/CEP17 ratio
+- Average HER2 copy number
+- ISH Group
+- Warning messages
+
+### Save/load
+
+- Save project as JSON.
+- Load project from JSON.
+- JSON must include image path, ROI, nuclei, counts, comments, and metadata.
+
+### CSV export
+
+Export one row per nucleus.
+
+CSV columns:
+
+- case_id
+- specimen_id
+- image_path
+- operator
+- nucleus_id
+- x
+- y
+- included
+- her2_black
+- cep17_red
+- cluster_value
+- cluster_note
+- effective_her2
+- comment
+
+Also export a summary CSV or append summary rows containing:
+
+- included_cell_count
+- total_her2
+- total_cep17
+- her2_cep17_ratio
+- average_her2_copy_number
+- ish_group
+- warning_messages
+
+### Annotated PNG export
+
+Export the original image with overlays:
+
+- ROI outline
+- nucleus numbers
+- nucleus circles/ellipses
+- included/excluded status
+- HER2/CEP17 counts near each nucleus if possible
+- summary text in a corner
+
+Do not destroy the original image file.
+
+## User interface layout
+
+Recommended layout:
+
+```text
+-----------------------------------------------------
+| Menu bar: Open / Save / Load / Export CSV / Export PNG |
+-----------------------------------------------------
+| Toolbar: ROI / Add nucleus / Select / Delete / Include |
+-----------------------------------------------------
+|                                                   |
+|  Image viewer                                     |
+|                                                   |
+|                            Right panel:           |
+|                            - Case metadata        |
+|                            - Nucleus table        |
+|                            - Calculation summary  |
+|                            - Warnings             |
+-----------------------------------------------------
+| Status bar: image coordinates, zoom level, messages |
+-----------------------------------------------------
+```
+
+## Keyboard shortcuts
+
+Implement if feasible:
+
+- Ctrl+O: open image
+- Ctrl+S: save project
+- Ctrl+E: export CSV
+- Ctrl+P: export annotated PNG
+- N: add nucleus mode
+- Delete: delete selected nucleus
+- I: toggle included/excluded
+- B: increment HER2 black count for selected nucleus
+- Shift+B: decrement HER2 black count
+- R: increment CEP17 red count
+- Shift+R: decrement CEP17 red count
+- C: edit cluster value
+
+## Testing requirements
+
+At minimum, add tests for scoring.py.
+
+Test cases:
+
+1. Group 1 example.
+2. Group 2 example.
+3. Group 3 example.
+4. Group 4 example.
+5. Group 5 example.
+6. Excluded nuclei are not counted.
+7. Cluster value is added to HER2 count.
+8. CEP17 total zero returns not evaluable.
+9. HER2/CEP17 ratio 1.8-2.2 generates additional-count warning.
+
+## Coding style
+
+- Keep GUI code and scoring logic separate.
+- Do not put calculation logic inside UI event handlers.
+- Use type hints where practical.
+- Keep functions small and testable.
+- Avoid global mutable state.
+- Add clear error messages.
+- Do not silently ignore failed file operations.
+
+## Documentation
+
+Update README.md with:
+
+- Project purpose
+- Research-use disclaimer
+- Installation instructions
+- How to run the app
+- How to use the app
+- How to run tests
+- Known limitations
+- Future roadmap
+
+## Roadmap
+
+### v0.1
+
+Manual nucleus registration, manual count input, scoring, save/load, CSV export, annotated PNG export.
+
+### v0.2
+
+Semi-automatic black/red dot candidate detection inside manually selected nuclei.
+
+### v0.3
+
+PDF report, QC checklist, improved cluster workflow, better audit trail.
+
+### v0.4
+
+Nuclear candidate detection using a trainable model or classical image processing, but still requiring user confirmation.
+
+### v1.0
+
+Validated internal research-use package with documented test images and known limitations.
+
+## Important constraints
+
+- Do not claim diagnostic approval.
+- Do not implement autonomous final diagnosis.
+- Do not prioritize full automation over verifiable manual workflow.
+- Do not include heavy AI dependencies in v0.1.
+- Do not break image-coordinate consistency during zoom and pan.
+- Do not overwrite original images.
