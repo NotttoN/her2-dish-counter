@@ -172,19 +172,35 @@ class ImageViewer(QGraphicsView):
 
         The scene may be zoomed or panned, but nuclei must be stored in
         original image pixels. Mapping through the pixmap item keeps the
-        saved coordinates independent from the current view transform.
+        saved coordinates independent from the current view transform.  Qt
+        mouse events can carry sub-pixel ``QPointF`` positions, so use the
+        inverse viewport transform directly instead of rounding through
+        ``mapToScene(QPoint)``.
         """
         if self._pixmap_item is None:
             return None
-        if isinstance(viewport_pos, QPointF):
-            viewport_point = viewport_pos.toPoint()
-        else:
-            viewport_point = viewport_pos
-        scene_pos = self.mapToScene(viewport_point)
+        scene_pos = self.scene_position_from_viewport_position(viewport_pos)
+        if scene_pos is None:
+            return None
         image_pos = self._pixmap_item.mapFromScene(scene_pos)
         if not self._point_is_on_image(image_pos):
             return None
         return QPointF(image_pos)
+
+    def scene_position_from_viewport_position(self, viewport_pos: QPoint | QPointF) -> QPointF | None:
+        """Map a viewport position to scene coordinates without integer rounding."""
+        viewport_point = QPointF(viewport_pos)
+        inverse_transform, invertible = self.viewportTransform().inverted()
+        if not invertible:
+            return None
+        return QPointF(inverse_transform.map(viewport_point))
+
+    def viewport_position_from_image_position(self, image_pos: QPoint | QPointF) -> QPointF | None:
+        """Map original image coordinates to a floating-point viewport position."""
+        if self._pixmap_item is None:
+            return None
+        scene_pos = self._pixmap_item.mapToScene(QPointF(image_pos))
+        return QPointF(self.viewportTransform().map(scene_pos))
 
     def _point_is_on_image(self, point: QPointF) -> bool:
         if self._pixmap_item is None:
