@@ -1,4 +1,4 @@
-# HER2-DISH Counter v0.1.1
+# HER2-DISH Counter v0.1.2
 
 HER2-DISH Counter is a research-use desktop helper for manual HER2 dual-probe ISH counting. It is not an automated segmentation or diagnostic system. Final diagnostic interpretation must be performed by a pathologist.
 
@@ -55,8 +55,8 @@ Use the **File** menu:
 - **Export CSV...** writes a count table with coordinates, radii, raw counts, effective HER2, inclusion status, and comments.
 - **Export annotated PNG...** writes an annotated image containing the original image, ROI, nucleus numbers, ellipses, HER2/CEP17 counts, summary score, and the research-use/pathologist-review disclaimer.
 
-## Scope of v0.1.1
+## Scope of v0.1.2
 
 - Nuclei are manually registered by user clicks.
-- Fully automated nucleus segmentation is intentionally not implemented in v0.1.1.
+- Fully automated nucleus segmentation is intentionally not implemented in v0.1.2.
 - Scoring, project I/O, and exporters live in `her2dish/core` so calculation logic remains separate from the GUI.
