@@ -32,11 +32,11 @@ IMAGE_FILTER = "Images (*.jpg *.jpeg *.png *.tif *.tiff)"
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.1."""
+    """Main window for HER2-DISH Counter v0.1.1."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.1")
+        self.setWindowTitle("HER2-DISH Counter v0.1.1")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.1")
+        title = QLabel("HER2-DISH Counter v0.1.1")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -97,9 +97,11 @@ class MainWindow(QMainWindow):
         right.addWidget(self.table)
 
         controls = QHBoxLayout()
-        add_btn = QPushButton("Add nucleus")
-        add_btn.clicked.connect(lambda: self.add_nucleus_at(0, 0))
-        controls.addWidget(add_btn)
+        self.add_nucleus_button = QPushButton("Add nucleus")
+        self.add_nucleus_button.clicked.connect(
+            lambda: self.viewer.set_mode(ImageViewer.MODE_ADD_NUCLEUS)
+        )
+        controls.addWidget(self.add_nucleus_button)
 
         remove_btn = QPushButton("Remove selected")
         remove_btn.clicked.connect(self.remove_selected_rows)

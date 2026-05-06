@@ -1,4 +1,4 @@
-# HER2-DISH Counter v0.1
+# HER2-DISH Counter v0.1.1
 
 HER2-DISH Counter is a research-use desktop helper for manual HER2 dual-probe ISH counting. It is not an automated segmentation or diagnostic system. Final diagnostic interpretation must be performed by a pathologist.
 
@@ -32,7 +32,7 @@ The application starts a PySide6 window with an image viewer, a nucleus count ta
 4. A new nucleus row is added to the table with image-coordinate `x` and `y` values, default ellipse radii, zero signal counts, and `Included` enabled.
 5. Each registered nucleus is drawn on the image with its nucleus number, an ellipse, and `H/C` count text. Included nuclei are green; excluded nuclei are gray.
 
-The **Add nucleus** button below the table can still add a row at coordinate `(0, 0)` for table-only testing.
+The **Add nucleus** button below the table also enters image-click registration mode; no nucleus row is created until you click inside the displayed image.
 
 ## Enter counts and comments
 
@@ -55,8 +55,8 @@ Use the **File** menu:
 - **Export CSV...** writes a count table with coordinates, radii, raw counts, effective HER2, inclusion status, and comments.
 - **Export annotated PNG...** writes an annotated image containing the original image, ROI, nucleus numbers, ellipses, HER2/CEP17 counts, summary score, and the research-use/pathologist-review disclaimer.
 
-## Scope of v0.1
+## Scope of v0.1.1
 
 - Nuclei are manually registered by user clicks.
-- Fully automated nucleus segmentation is intentionally not implemented in v0.1.
+- Fully automated nucleus segmentation is intentionally not implemented in v0.1.1.
 - Scoring, project I/O, and exporters live in `her2dish/core` so calculation logic remains separate from the GUI.
