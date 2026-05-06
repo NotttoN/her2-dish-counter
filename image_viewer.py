@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsView
 
@@ -114,27 +114,34 @@ class ImageViewer(QGraphicsView):
         if not self.has_image():
             super().mousePressEvent(event)
             return
-        scene_pos = self.mapToScene(event.position().toPoint())
+        image_pos = self.image_position_from_viewport_position(event.position())
         if event.button() == Qt.MouseButton.LeftButton and self._mode == self.MODE_ADD_NUCLEUS:
-            if self._point_is_on_image(scene_pos):
-                self.nucleusClicked.emit(scene_pos.x(), scene_pos.y())
+            if image_pos is not None:
+                self.nucleusClicked.emit(image_pos.x(), image_pos.y())
             return
         if event.button() == Qt.MouseButton.LeftButton and self._mode == self.MODE_RECT_ROI:
-            self._roi_start = scene_pos
+            if image_pos is None:
+                return
+            self._roi_start = image_pos
             self._drawing_roi = True
-            self.set_roi(RoiRectangle(scene_pos.x(), scene_pos.y(), 0, 0))
+            self.set_roi(RoiRectangle(image_pos.x(), image_pos.y(), 0, 0))
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
-        scene_pos = self.mapToScene(event.position().toPoint())
-        self.statusChanged.emit(f"x={scene_pos.x():.1f}, y={scene_pos.y():.1f}")
+        image_pos = self.image_position_from_viewport_position(event.position())
+        if image_pos is None:
+            self.statusChanged.emit("outside image")
+        else:
+            self.statusChanged.emit(f"x={image_pos.x():.1f}, y={image_pos.y():.1f}")
         if self._drawing_roi and self._roi_start is not None:
+            if image_pos is None:
+                return
             roi = RoiRectangle(
                 self._roi_start.x(),
                 self._roi_start.y(),
-                scene_pos.x() - self._roi_start.x(),
-                scene_pos.y() - self._roi_start.y(),
+                image_pos.x() - self._roi_start.x(),
+                image_pos.y() - self._roi_start.y(),
             ).normalized()
             self.set_roi(roi)
             return
@@ -142,12 +149,16 @@ class ImageViewer(QGraphicsView):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
         if event.button() == Qt.MouseButton.LeftButton and self._drawing_roi and self._roi_start is not None:
-            scene_pos = self.mapToScene(event.position().toPoint())
+            image_pos = self.image_position_from_viewport_position(event.position())
+            if image_pos is None:
+                self._drawing_roi = False
+                self._roi_start = None
+                return
             roi = RoiRectangle(
                 self._roi_start.x(),
                 self._roi_start.y(),
-                scene_pos.x() - self._roi_start.x(),
-                scene_pos.y() - self._roi_start.y(),
+                image_pos.x() - self._roi_start.x(),
+                image_pos.y() - self._roi_start.y(),
             ).normalized()
             self._drawing_roi = False
             self._roi_start = None
@@ -155,6 +166,25 @@ class ImageViewer(QGraphicsView):
             self.roiChanged.emit(roi)
             return
         super().mouseReleaseEvent(event)
+
+    def image_position_from_viewport_position(self, viewport_pos: QPoint | QPointF) -> QPointF | None:
+        """Convert a viewport mouse position to original image coordinates.
+
+        The scene may be zoomed or panned, but nuclei must be stored in
+        original image pixels. Mapping through the pixmap item keeps the
+        saved coordinates independent from the current view transform.
+        """
+        if self._pixmap_item is None:
+            return None
+        if isinstance(viewport_pos, QPointF):
+            viewport_point = viewport_pos.toPoint()
+        else:
+            viewport_point = viewport_pos
+        scene_pos = self.mapToScene(viewport_point)
+        image_pos = self._pixmap_item.mapFromScene(scene_pos)
+        if not self._point_is_on_image(image_pos):
+            return None
+        return QPointF(image_pos)
 
     def _point_is_on_image(self, point: QPointF) -> bool:
         if self._pixmap_item is None:
