@@ -1,75 +1,62 @@
-from her2dish.core.constants import BORDERLINE_RATIO_WARNING, GROUP_ADDITIONAL_EVALUATION_WARNING
-from her2dish.core.models import NucleusCount
-from her2dish.core.scoring import calculate_score, classify_ish_group
+# HER2-DISH Counter v0.1
 
+HER2-DISH Counter is a research-use desktop helper for manual HER2 dual-probe ISH counting. It is not an automated segmentation or diagnostic system. Final diagnostic interpretation must be performed by a pathologist.
 
-def nuclei(count, her2, cep17):
-    return [NucleusCount(nucleus_id=i + 1, x=0, y=0, her2_black=her2, cep17_red=cep17) for i in range(count)]
+## Install and start
 
+```bash
+python -m pip install -r requirements.txt
+python app.py
+```
 
-def test_group_1():
-    result = calculate_score(nuclei(20, her2=4, cep17=1))
-    assert result.ish_group == "Group 1"
-    assert result.total_her2 == 80
-    assert result.total_cep17 == 20
-    assert result.her2_cep17_ratio == 4.0
-    assert result.average_her2_copy_number == 4.0
+The application starts a PySide6 window with an image viewer, a nucleus count table, and a live HER2/CEP17 calculation panel.
 
+## Open an image
 
-def test_group_2():
-    result = calculate_score(nuclei(20, her2=3, cep17=1))
-    assert result.ish_group == "Group 2"
-    assert GROUP_ADDITIONAL_EVALUATION_WARNING in result.warnings
+1. Choose **File → Open image...** or click **Open image** on the toolbar.
+2. Select a supported image file: `jpg`, `jpeg`, `png`, `tif`, or `tiff`.
+3. The image appears in the viewer. Use the mouse wheel to zoom and **Pan** mode to drag the view.
 
+## Create a rectangular ROI
 
-def test_group_3():
-    result = calculate_score(nuclei(20, her2=6, cep17=4))
-    assert result.ish_group == "Group 3"
-    assert GROUP_ADDITIONAL_EVALUATION_WARNING in result.warnings
+1. Click **Rect ROI** on the toolbar.
+2. Drag on the image to draw a rectangular tumor ROI.
+3. The ROI is shown as a yellow rectangle and is saved into the JSON project.
+4. Click **ROI-only ON/OFF** to restrict nucleus registration to clicks inside the ROI.
 
+## Register nuclei by clicking
 
-def test_group_4():
-    result = calculate_score(nuclei(20, her2=5, cep17=3))
-    assert result.ish_group == "Group 4"
-    assert GROUP_ADDITIONAL_EVALUATION_WARNING in result.warnings
+1. Open an image.
+2. Click **Add nucleus** on the toolbar.
+3. Click each nucleus on the image.
+4. A new nucleus row is added to the table with image-coordinate `x` and `y` values, default ellipse radii, zero signal counts, and `Included` enabled.
+5. Each registered nucleus is drawn on the image with its nucleus number, an ellipse, and `H/C` count text. Included nuclei are green; excluded nuclei are gray.
 
+The **Add nucleus** button below the table can still add a row at coordinate `(0, 0)` for table-only testing.
 
-def test_group_5():
-    result = calculate_score(nuclei(20, her2=3, cep17=3))
-    assert result.ish_group == "Group 5"
+## Enter counts and comments
 
+Edit the table columns directly:
 
-def test_excluded_nuclei_are_not_counted():
-    data = nuclei(20, her2=3, cep17=3)
-    data.append(NucleusCount(nucleus_id=21, x=0, y=0, her2_black=100, cep17_red=1, included=False))
-    result = calculate_score(data)
-    assert result.total_her2 == 60
-    assert result.total_cep17 == 60
-    assert result.ish_group == "Group 5"
+- **HER2**: black HER2 signal count.
+- **CEP17**: red CEP17 signal count.
+- **Cluster**: additional HER2 cluster value added to HER2.
+- **Included**: whether the nucleus contributes to the score.
+- **Comment**: free text note.
 
+The **Effective HER2**, totals, HER2/CEP17 ratio, average HER2 copy number, ISH group, and warnings update immediately after edits.
 
-def test_cluster_value_added_to_her2():
-    data = [NucleusCount(nucleus_id=i + 1, x=0, y=0, her2_black=1, cep17_red=1, cluster_value=3) for i in range(20)]
-    result = calculate_score(data)
-    assert result.total_her2 == 80
-    assert result.average_her2_copy_number == 4
-    assert result.ish_group == "Group 1"
+## Save, load, and export
 
+Use the **File** menu:
 
-def test_zero_cep17_is_not_evaluable():
-    result = calculate_score(nuclei(20, her2=4, cep17=0))
-    assert result.ish_group == "Not evaluable"
-    assert result.her2_cep17_ratio is None
-    assert result.average_her2_copy_number is None
+- **Save JSON project...** writes image path, ROI coordinates, nucleus coordinates, radii, counts, included flags, and comments.
+- **Open JSON project...** restores saved project data and reloads the referenced image when available.
+- **Export CSV...** writes a count table with coordinates, radii, raw counts, effective HER2, inclusion status, and comments.
+- **Export annotated PNG...** writes an annotated image containing the original image, ROI, nucleus numbers, ellipses, HER2/CEP17 counts, summary score, and the research-use/pathologist-review disclaimer.
 
+## Scope of v0.1
 
-def test_borderline_ratio_warning():
-    # ratio = 40/20 = 2.0, average HER2 = 2.0, Group 2 and borderline ratio
-    result = calculate_score(nuclei(20, her2=2, cep17=1))
-    assert result.ish_group == "Group 2"
-    assert BORDERLINE_RATIO_WARNING in result.warnings
-
-
-def test_classify_none_values():
-    assert classify_ish_group(None, 5.0) == "Not evaluable"
-    assert classify_ish_group(2.0, None) == "Not evaluable"
+- Nuclei are manually registered by user clicks.
+- Fully automated nucleus segmentation is intentionally not implemented in v0.1.
+- Scoring, project I/O, and exporters live in `her2dish/core` so calculation logic remains separate from the GUI.

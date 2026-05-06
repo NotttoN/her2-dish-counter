@@ -1,21 +1,3 @@
-from her2dish.core.models import CaseProject, NucleusCount
-from her2dish.core.project_io import load_project, save_project
-
-
-def test_save_and_load_project(tmp_path):
-    project = CaseProject(
-        case_id="case-001",
-        specimen_id="specimen-001",
-        image_path="image.png",
-        operator="tester",
-        nuclei=[NucleusCount(nucleus_id=1, x=10.5, y=20.5, her2_black=4, cep17_red=2)],
-    )
-    path = tmp_path / "project.json"
-    save_project(project, path)
-    loaded = load_project(path)
-    assert loaded.case_id == "case-001"
-    assert loaded.specimen_id == "specimen-001"
-    assert loaded.image_path == "image.png"
-    assert len(loaded.nuclei) == 1
-    assert loaded.nuclei[0].her2_black == 4
-    assert loaded.nuclei[0].cep17_red == 2
+PySide6
+Pillow
+pytest
