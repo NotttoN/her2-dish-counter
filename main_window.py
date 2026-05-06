@@ -32,11 +32,11 @@ IMAGE_FILTER = "Images (*.jpg *.jpeg *.png *.tif *.tiff)"
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.1.1."""
+    """Main window for HER2-DISH Counter v0.1.2."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.1.1")
+        self.setWindowTitle("HER2-DISH Counter v0.1.2")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.1.1")
+        title = QLabel("HER2-DISH Counter v0.1.2")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)

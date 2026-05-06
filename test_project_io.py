@@ -53,4 +53,24 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     export_annotated_png(project, png_path)
     assert png_path.exists()
     exported = pillow.open(png_path)
-    assert exported.size == (320, 240)
+    assert exported.width > 320
+    assert exported.height > 240
+
+
+def test_annotated_png_expands_canvas_for_disclaimer_and_bottom_annotations(tmp_path):
+    pillow = pytest.importorskip("PIL.Image")
+    image_path = tmp_path / "source.png"
+    pillow.new("RGB", (120, 90), "white").save(image_path)
+
+    project = CaseProject(
+        image_path=str(image_path),
+        roi=RoiRectangle(8, 8, 100, 72),
+        nuclei=[NucleusCount(nucleus_id=1, x=95, y=86, radius_x=25, radius_y=18, her2_black=3, cep17_red=2)],
+    )
+
+    png_path = tmp_path / "annotated-expanded.png"
+    export_annotated_png(project, png_path)
+
+    exported = pillow.open(png_path)
+    assert exported.width >= 520
+    assert exported.height > 90
