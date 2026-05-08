@@ -20,7 +20,9 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                 "radius_x",
                 "radius_y",
                 "her2_black",
-                "cluster_value",
+                "small_cluster_count",
+                "large_cluster_count",
+                "manual_cluster_add",
                 "effective_her2",
                 "cep17_red",
                 "included",
@@ -36,7 +38,9 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                     n.radius_x,
                     n.radius_y,
                     n.her2_black,
-                    n.cluster_value,
+                    n.small_cluster_count,
+                    n.large_cluster_count,
+                    n.manual_cluster_add,
                     n.effective_her2,
                     n.cep17_red,
                     n.included,
@@ -150,7 +154,7 @@ def _draw_summary_panel(draw, panel_box: tuple[int, int, int, int], score: Score
     panel_left, panel_top, panel_right, panel_bottom = panel_box
     panel_padding = 18
     line_gap = 6
-    title = "HER2-DISH Counter v0.1.2"
+    title = "HER2-DISH Counter v0.1.3"
     summary_lines = score_summary_lines(score)
     max_text_width = panel_right - panel_left - 2 * panel_padding
 
@@ -177,7 +181,7 @@ def _summary_panel_height(draw, width: int, score: ScoreResult) -> int:
     panel_padding = 18
     line_gap = 6
     max_text_width = width - 2 * panel_padding
-    panel_lines = ["HER2-DISH Counter v0.1.2", *score_summary_lines(score)]
+    panel_lines = ["HER2-DISH Counter v0.1.3", *score_summary_lines(score)]
     panel_lines.extend(_wrap_text(draw, RESEARCH_USE_DISCLAIMER, max_text_width))
     line_height = max(_text_size(draw, line)[1] for line in panel_lines) + line_gap
     title_spacing = 4
@@ -199,7 +203,7 @@ def export_annotated_png(project: CaseProject, path: str | Path, canvas_size: tu
     scratch = Image.new("RGB", (1, 1), "white")
     scratch_draw = ImageDraw.Draw(scratch)
     longest_required_line = max(
-        ["HER2-DISH Counter v0.1.2", *score_summary_lines(score), RESEARCH_USE_DISCLAIMER],
+        ["HER2-DISH Counter v0.1.3", *score_summary_lines(score), RESEARCH_USE_DISCLAIMER],
         key=lambda line: _text_size(scratch_draw, line)[0],
     )
     min_panel_width = _text_size(scratch_draw, longest_required_line)[0] + 36

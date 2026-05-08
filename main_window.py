@@ -32,11 +32,11 @@ IMAGE_FILTER = "Images (*.jpg *.jpeg *.png *.tif *.tiff)"
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.1.2."""
+    """Main window for HER2-DISH Counter v0.1.3."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.1.2")
+        self.setWindowTitle("HER2-DISH Counter v0.1.3")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.1.2")
+        title = QLabel("HER2-DISH Counter v0.1.3")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -88,9 +88,22 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setSizes([760, 520])
 
-        self.table = QTableWidget(0, 10, self)
+        self.table = QTableWidget(0, 12, self)
         self.table.setHorizontalHeaderLabels(
-            ["ID", "X", "Y", "HER2", "CEP17", "Cluster", "Effective HER2", "Included", "Comment", "Radius"]
+            [
+                "ID",
+                "X",
+                "Y",
+                "HER2 dots",
+                "Small cluster",
+                "Large cluster",
+                "Manual HER2 add",
+                "Effective HER2",
+                "CEP17",
+                "Included",
+                "Comment",
+                "Radius",
+            ]
         )
         self.table.verticalHeader().setVisible(False)
         self.table.itemChanged.connect(self._table_item_changed)
@@ -207,9 +220,9 @@ class MainWindow(QMainWindow):
             (0, str(nucleus.nucleus_id), False),
             (1, f"{nucleus.x:.1f}", False),
             (2, f"{nucleus.y:.1f}", False),
-            (6, str(nucleus.effective_her2), False),
-            (8, nucleus.comment, True),
-            (9, f"{nucleus.radius_x:.1f} × {nucleus.radius_y:.1f}", False),
+            (7, str(nucleus.effective_her2), False),
+            (10, nucleus.comment, True),
+            (11, f"{nucleus.radius_x:.1f} × {nucleus.radius_y:.1f}", False),
         ]:
             item = QTableWidgetItem(value)
             if not editable:
@@ -217,16 +230,20 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, col, item)
 
         her2 = self._make_spin(value=nucleus.her2_black, on_change=self._sync_project_from_table)
+        small_cluster = self._make_spin(value=nucleus.small_cluster_count, on_change=self._sync_project_from_table)
+        large_cluster = self._make_spin(value=nucleus.large_cluster_count, on_change=self._sync_project_from_table)
+        manual_add = self._make_spin(value=nucleus.manual_cluster_add, on_change=self._sync_project_from_table)
         cep17 = self._make_spin(value=nucleus.cep17_red, on_change=self._sync_project_from_table)
-        cluster = self._make_spin(value=nucleus.cluster_value, on_change=self._sync_project_from_table)
         included = QCheckBox()
         included.setChecked(nucleus.included)
         included.stateChanged.connect(self._sync_project_from_table)
 
         self.table.setCellWidget(row, 3, her2)
-        self.table.setCellWidget(row, 4, cep17)
-        self.table.setCellWidget(row, 5, cluster)
-        self.table.setCellWidget(row, 7, included)
+        self.table.setCellWidget(row, 4, small_cluster)
+        self.table.setCellWidget(row, 5, large_cluster)
+        self.table.setCellWidget(row, 6, manual_add)
+        self.table.setCellWidget(row, 8, cep17)
+        self.table.setCellWidget(row, 9, included)
         self._updating_table = False
 
     def refresh_table_from_project(self) -> None:
@@ -251,7 +268,7 @@ class MainWindow(QMainWindow):
     def _table_item_changed(self, item: QTableWidgetItem) -> None:
         if self._updating_table:
             return
-        if item.column() == 8 and item.row() < len(self.project.nuclei):
+        if item.column() == 10 and item.row() < len(self.project.nuclei):
             self.project.nuclei[item.row()].comment = item.text()
             self.update_score()
 
@@ -260,18 +277,24 @@ class MainWindow(QMainWindow):
             return
         for row, nucleus in enumerate(self.project.nuclei):
             her2 = self.table.cellWidget(row, 3)
-            cep17 = self.table.cellWidget(row, 4)
-            cluster = self.table.cellWidget(row, 5)
-            included = self.table.cellWidget(row, 7)
+            small_cluster = self.table.cellWidget(row, 4)
+            large_cluster = self.table.cellWidget(row, 5)
+            manual_add = self.table.cellWidget(row, 6)
+            cep17 = self.table.cellWidget(row, 8)
+            included = self.table.cellWidget(row, 9)
             if isinstance(her2, QSpinBox):
                 nucleus.her2_black = her2.value()
+            if isinstance(small_cluster, QSpinBox):
+                nucleus.small_cluster_count = small_cluster.value()
+            if isinstance(large_cluster, QSpinBox):
+                nucleus.large_cluster_count = large_cluster.value()
+            if isinstance(manual_add, QSpinBox):
+                nucleus.manual_cluster_add = manual_add.value()
             if isinstance(cep17, QSpinBox):
                 nucleus.cep17_red = cep17.value()
-            if isinstance(cluster, QSpinBox):
-                nucleus.cluster_value = cluster.value()
             if isinstance(included, QCheckBox):
                 nucleus.included = included.isChecked()
-            effective_item = self.table.item(row, 6)
+            effective_item = self.table.item(row, 7)
             if effective_item is not None:
                 effective_item.setText(str(nucleus.effective_her2))
         self.viewer.draw_nuclei(self.project.nuclei)

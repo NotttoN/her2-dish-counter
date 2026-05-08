@@ -65,15 +65,22 @@ class NucleusCount:
     radius_x: float = 25.0
     radius_y: float = 18.0
     her2_black: int = 0
+    small_cluster_count: int = 0
+    large_cluster_count: int = 0
+    manual_cluster_add: int = 0
     cep17_red: int = 0
-    cluster_value: int = 0
     cluster_note: str = ""
     included: bool = True
     comment: str = ""
 
     @property
     def effective_her2(self) -> int:
-        return int(self.her2_black) + int(self.cluster_value)
+        return (
+            int(self.her2_black)
+            + int(self.small_cluster_count) * 6
+            + int(self.large_cluster_count) * 12
+            + int(self.manual_cluster_add)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,8 +92,11 @@ class NucleusCount:
         payload.setdefault("radius_x", 25.0)
         payload.setdefault("radius_y", 18.0)
         payload.setdefault("her2_black", 0)
+        legacy_cluster_value = int(payload.pop("cluster_value", 0))
+        payload.setdefault("small_cluster_count", 0)
+        payload.setdefault("large_cluster_count", 0)
+        payload.setdefault("manual_cluster_add", legacy_cluster_value)
         payload.setdefault("cep17_red", 0)
-        payload.setdefault("cluster_value", 0)
         payload.setdefault("cluster_note", "")
         payload.setdefault("included", True)
         payload.setdefault("comment", "")

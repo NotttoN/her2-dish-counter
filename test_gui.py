@@ -108,3 +108,32 @@ def test_viewer_click_coordinates_survive_zoom_and_pan(qt_app, tmp_path):
     qt_app.processEvents()
 
     assert clicked == pytest.approx([(expected.x(), expected.y())], abs=0.01)
+
+
+def test_count_table_cluster_columns_update_effective_her2(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(10, 20)
+    qt_app.processEvents()
+
+    headers = [window.table.horizontalHeaderItem(i).text() for i in range(window.table.columnCount())]
+    assert headers[3:9] == [
+        "HER2 dots",
+        "Small cluster",
+        "Large cluster",
+        "Manual HER2 add",
+        "Effective HER2",
+        "CEP17",
+    ]
+
+    window.table.cellWidget(0, 3).setValue(2)
+    window.table.cellWidget(0, 4).setValue(1)
+    window.table.cellWidget(0, 5).setValue(1)
+    window.table.cellWidget(0, 6).setValue(3)
+    window.table.cellWidget(0, 8).setValue(5)
+    qt_app.processEvents()
+
+    nucleus = window.project.nuclei[0]
+    assert nucleus.effective_her2 == 23
+    assert nucleus.cep17_red == 5
+    assert window.table.item(0, 7).text() == "23"
+    assert "Total HER2 (effective): 23" in window.summary_label.text()
