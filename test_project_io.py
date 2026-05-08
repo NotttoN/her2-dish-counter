@@ -34,12 +34,12 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     pillow.new("RGB", (320, 240), "white").save(image_path)
 
     nuclei = [
-        NucleusCount(nucleus_id=1, x=100, y=120, her2_black=4, cep17_red=2),
-        NucleusCount(nucleus_id=2, x=180, y=200, her2_black=2, cep17_red=2, cluster_value=1, included=False),
+        NucleusCount(nucleus_id=1, x=100, y=120, her2_black=4, small_cluster_count=1, cep17_red=2),
+        NucleusCount(nucleus_id=2, x=180, y=200, her2_black=2, manual_cluster_add=1, cep17_red=2, included=False),
     ]
     project = CaseProject(case_id="c", specimen_id="s", image_path=str(image_path), roi=RoiRectangle(50, 60, 200, 120), nuclei=nuclei)
     score = calculate_score(project.nuclei)
-    assert score.total_her2 == 4
+    assert score.total_her2 == 10
     assert score.total_cep17 == 2
 
     csv_path = tmp_path / "counts.csv"
@@ -47,7 +47,10 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     with csv_path.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["radius_x"] == "25.0"
-    assert rows[0]["effective_her2"] == "4"
+    assert rows[0]["small_cluster_count"] == "1"
+    assert rows[0]["large_cluster_count"] == "0"
+    assert rows[0]["manual_cluster_add"] == "0"
+    assert rows[0]["effective_her2"] == "10"
 
     png_path = tmp_path / "annotated.png"
     export_annotated_png(project, png_path)

@@ -48,12 +48,34 @@ def test_excluded_nuclei_are_not_counted():
     assert result.ish_group == "Group 5"
 
 
-def test_cluster_value_added_to_her2():
-    data = [NucleusCount(nucleus_id=i + 1, x=0, y=0, her2_black=1, cep17_red=1, cluster_value=3) for i in range(20)]
+def test_cluster_counts_use_effective_her2_weights():
+    data = [
+        NucleusCount(
+            nucleus_id=i + 1,
+            x=0,
+            y=0,
+            her2_black=2,
+            small_cluster_count=1,
+            large_cluster_count=1,
+            manual_cluster_add=3,
+            cep17_red=5,
+        )
+        for i in range(20)
+    ]
     result = calculate_score(data)
-    assert result.total_her2 == 80
-    assert result.average_her2_copy_number == 4
+    assert data[0].effective_her2 == 23
+    assert result.total_her2 == 460
+    assert result.average_her2_copy_number == 23
     assert result.ish_group == "Group 1"
+
+
+def test_legacy_cluster_value_loads_as_manual_her2_add():
+    nucleus = NucleusCount.from_dict(
+        {"nucleus_id": 1, "x": 0, "y": 0, "her2_black": 2, "cluster_value": 3, "cep17_red": 1}
+    )
+    assert nucleus.manual_cluster_add == 3
+    assert nucleus.effective_her2 == 5
+    assert "cluster_value" not in nucleus.to_dict()
 
 
 def test_zero_cep17_is_not_evaluable():
