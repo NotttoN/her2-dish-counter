@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -30,13 +31,41 @@ from image_viewer import ImageViewer
 
 IMAGE_FILTER = "Images (*.jpg *.jpeg *.png *.tif *.tiff)"
 
+TABLE_HEADERS = [
+    "ID",
+    "X",
+    "Y",
+    "HER2",
+    "S-cluster",
+    "L-cluster",
+    "Manual +",
+    "Eff. HER2",
+    "CEP17",
+    "Inc.",
+    "Comment",
+]
+
+TABLE_COLUMN_WIDTHS = {
+    0: 45,
+    1: 70,
+    2: 70,
+    3: 75,
+    4: 85,
+    5: 85,
+    6: 90,
+    7: 85,
+    8: 75,
+    9: 55,
+    10: 160,
+}
+
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.1.3."""
+    """Main window for HER2-DISH Counter v0.1.4."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.1.3")
+        self.setWindowTitle("HER2-DISH Counter v0.1.4")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -61,7 +90,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.1.3")
+        title = QLabel("HER2-DISH Counter v0.1.4")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -88,23 +117,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right_panel)
         splitter.setSizes([760, 520])
 
-        self.table = QTableWidget(0, 12, self)
-        self.table.setHorizontalHeaderLabels(
-            [
-                "ID",
-                "X",
-                "Y",
-                "HER2 dots",
-                "Small cluster",
-                "Large cluster",
-                "Manual HER2 add",
-                "Effective HER2",
-                "CEP17",
-                "Included",
-                "Comment",
-                "Radius",
-            ]
-        )
+        self.table = QTableWidget(0, len(TABLE_HEADERS), self)
+        self.table.setHorizontalHeaderLabels(TABLE_HEADERS)
+        self._apply_count_table_column_widths()
         self.table.verticalHeader().setVisible(False)
         self.table.itemChanged.connect(self._table_item_changed)
         right.addWidget(self.table)
@@ -133,6 +148,13 @@ class MainWindow(QMainWindow):
         disclaimer.setWordWrap(True)
         disclaimer.setStyleSheet("color: #666;")
         right.addWidget(disclaimer)
+
+    def _apply_count_table_column_widths(self) -> None:
+        """Apply compact initial widths for the nucleus count table UI."""
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for column, width in TABLE_COLUMN_WIDTHS.items():
+            self.table.setColumnWidth(column, width)
 
     def _make_spin(self, minimum: int = 0, maximum: int = 999, value: int = 0, on_change: Callable | None = None) -> QSpinBox:
         spin = QSpinBox(self)
@@ -222,7 +244,6 @@ class MainWindow(QMainWindow):
             (2, f"{nucleus.y:.1f}", False),
             (7, str(nucleus.effective_her2), False),
             (10, nucleus.comment, True),
-            (11, f"{nucleus.radius_x:.1f} × {nucleus.radius_y:.1f}", False),
         ]:
             item = QTableWidgetItem(value)
             if not editable:
