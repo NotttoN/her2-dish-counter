@@ -1,4 +1,4 @@
-# HER2-DISH Counter v0.1.3
+# HER2-DISH Counter v0.1.4
 
 HER2-DISH Counter is a research-use desktop helper for manual HER2 dual-probe ISH counting. It is not an automated segmentation or diagnostic system. Final diagnostic interpretation must be performed by a pathologist.
 
@@ -38,15 +38,15 @@ The **Add nucleus** button below the table also enters image-click registration 
 
 Edit the table columns directly:
 
-- **HER2 dots**: black HER2 dot count.
-- **Small cluster**: small HER2 cluster count; each small cluster contributes 6 effective HER2 copies.
-- **Large cluster**: large HER2 cluster count; each large cluster contributes 12 effective HER2 copies.
-- **Manual HER2 add**: manually entered additional HER2 copies for special cluster handling or legacy count adjustment.
+- **HER2**: black HER2 dot count.
+- **S-cluster**: small HER2 cluster count; each small cluster contributes 6 effective HER2 copies.
+- **L-cluster**: large HER2 cluster count; each large cluster contributes 12 effective HER2 copies.
+- **Manual +**: manually entered additional HER2 copies for special cluster handling or legacy count adjustment.
 - **CEP17**: red CEP17 signal count.
-- **Included**: whether the nucleus contributes to the score.
+- **Inc.**: whether the nucleus contributes to the score.
 - **Comment**: free text note.
 
-The **Effective HER2** value is calculated as `HER2 dots + Small cluster × 6 + Large cluster × 12 + Manual HER2 add`. Effective HER2, totals, HER2/CEP17 ratio, average HER2 copy number, ISH group, and warnings update immediately after edits.
+The **Eff. HER2** value is calculated as `HER2 dots + Small cluster × 6 + Large cluster × 12 + Manual HER2 add`. Effective HER2, totals, HER2/CEP17 ratio, average HER2 copy number, ISH group, and warnings update immediately after edits.
 
 ## Save, load, and export
 
@@ -57,8 +57,8 @@ Use the **File** menu:
 - **Export CSV...** writes a count table with coordinates, radii, raw counts, effective HER2, inclusion status, and comments.
 - **Export annotated PNG...** writes an annotated image containing the original image, ROI, nucleus numbers, ellipses, HER2/CEP17 counts, summary score, and the research-use/pathologist-review disclaimer.
 
-## Scope of v0.1.3
+## Scope of v0.1.4
 
 - Nuclei are manually registered by user clicks.
-- Fully automated nucleus segmentation is intentionally not implemented in v0.1.3.
+- Fully automated nucleus segmentation is intentionally not implemented in v0.1.4.
 - Scoring, project I/O, and exporters live in `her2dish/core` so calculation logic remains separate from the GUI.

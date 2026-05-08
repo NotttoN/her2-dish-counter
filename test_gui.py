@@ -116,14 +116,21 @@ def test_count_table_cluster_columns_update_effective_her2(qt_app):
     qt_app.processEvents()
 
     headers = [window.table.horizontalHeaderItem(i).text() for i in range(window.table.columnCount())]
-    assert headers[3:9] == [
-        "HER2 dots",
-        "Small cluster",
-        "Large cluster",
-        "Manual HER2 add",
-        "Effective HER2",
+    assert headers == [
+        "ID",
+        "X",
+        "Y",
+        "HER2",
+        "S-cluster",
+        "L-cluster",
+        "Manual +",
+        "Eff. HER2",
         "CEP17",
+        "Inc.",
+        "Comment",
     ]
+    expected_widths = [45, 70, 70, 75, 85, 85, 90, 85, 75, 55, 160]
+    assert [window.table.columnWidth(i) for i in range(11)] == expected_widths
 
     window.table.cellWidget(0, 3).setValue(2)
     window.table.cellWidget(0, 4).setValue(1)
