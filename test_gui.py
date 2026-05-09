@@ -144,3 +144,79 @@ def test_count_table_cluster_columns_update_effective_her2(qt_app):
     assert nucleus.cep17_red == 5
     assert window.table.item(0, 7).text() == "23"
     assert "Total HER2 (effective): 23" in window.summary_label.text()
+
+
+def test_table_selection_highlights_nucleus_and_updates_selected_panel(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(10, 20)
+    window.add_nucleus_at(50, 60)
+    qt_app.processEvents()
+
+    window.table.selectRow(0)
+    qt_app.processEvents()
+
+    assert window.selected_nucleus_id == 1
+    assert "Selected nucleus: #1" in window.selected_nucleus_label.text()
+    selected_ellipses = [
+        item
+        for item in window.viewer._overlay_items
+        if item.data(0) == 1 and hasattr(item, "pen")
+    ]
+    assert selected_ellipses
+    assert selected_ellipses[0].pen().color().name().lower() == "#ffff00"
+    assert selected_ellipses[0].pen().width() == 5
+
+    window.table.cellWidget(0, 3).setValue(3)
+    window.table.cellWidget(0, 4).setValue(1)
+    window.table.cellWidget(0, 5).setValue(1)
+    window.table.cellWidget(0, 6).setValue(2)
+    window.table.cellWidget(0, 8).setValue(2)
+    qt_app.processEvents()
+
+    panel_text = window.selected_nucleus_label.text()
+    assert "HER2: 3" in panel_text
+    assert "CEP17: 2" in panel_text
+    assert "Small cluster: 1" in panel_text
+    assert "Large cluster: 1" in panel_text
+    assert "Effective HER2: 23" in panel_text
+
+
+def test_viewer_marker_click_selects_matching_table_row(qt_app, tmp_path):
+    image_path = tmp_path / "source.png"
+    _write_image(image_path)
+
+    window = MainWindow()
+    window.viewer.resize(640, 480)
+    window.viewer.load_image(image_path)
+    window.add_nucleus_at(80, 90)
+    window.add_nucleus_at(150, 140)
+    window.viewer.set_mode(ImageViewer.MODE_PAN)
+    window.show()
+    qt_app.processEvents()
+
+    viewport_pos, _ = _clickable_viewport_point_for_image_position(window.viewer, QPointF(150.0, 140.0))
+    QTest.mouseClick(window.viewer.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, viewport_pos)
+    qt_app.processEvents()
+
+    assert window.selected_nucleus_id == 2
+    assert window.table.currentRow() == 1
+    assert window.table.item(1, 0).isSelected()
+    assert "Selected nucleus: #2" in window.selected_nucleus_label.text()
+
+
+def test_excluded_nucleus_uses_gray_dashed_marker(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(10, 20)
+    window.table.cellWidget(0, 9).setChecked(False)
+    qt_app.processEvents()
+    window.select_nucleus_by_id(None)
+    qt_app.processEvents()
+
+    excluded_ellipses = [
+        item
+        for item in window.viewer._overlay_items
+        if item.data(0) == 1 and hasattr(item, "pen")
+    ]
+    assert excluded_ellipses
+    assert excluded_ellipses[0].pen().color().name().lower() == "#808080"
+    assert excluded_ellipses[0].pen().style() == Qt.PenStyle.DashLine
