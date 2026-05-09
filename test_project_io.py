@@ -51,6 +51,8 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     assert rows[0]["large_cluster_count"] == "0"
     assert rows[0]["manual_cluster_add"] == "0"
     assert rows[0]["effective_her2"] == "10"
+    assert rows[0]["detected_black_dot_count"] == "0"
+    assert rows[0]["detected_red_dot_count"] == "0"
 
     png_path = tmp_path / "annotated.png"
     export_annotated_png(project, png_path)

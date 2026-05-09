@@ -29,7 +29,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from PIL import Image
+
 from her2dish.core.constants import RESEARCH_USE_DISCLAIMER
+from her2dish.core.dot_detection import DEFAULT_DOT_DETECTION_PARAMS, detect_black_dots, detect_red_dots
 from her2dish.core.exporters import export_annotated_png, export_csv
 from her2dish.core.models import CaseProject, NucleusCount, RoiRectangle
 from her2dish.core.project_io import load_project, save_project
@@ -68,11 +71,11 @@ TABLE_COLUMN_WIDTHS = {
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.1.5."""
+    """Main window for HER2-DISH Counter v0.2.0."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.1.5")
+        self.setWindowTitle("HER2-DISH Counter v0.2.0")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -100,7 +103,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.1.5")
+        title = QLabel("HER2-DISH Counter v0.2.0")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -153,6 +156,24 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.roi_mode_label)
         controls.addStretch(1)
         right.addLayout(controls)
+
+        dot_controls = QHBoxLayout()
+        self.detect_dots_button = QPushButton("Detect dots")
+        self.detect_dots_button.clicked.connect(self.detect_dots_for_selected_nucleus)
+        dot_controls.addWidget(self.detect_dots_button)
+
+        self.apply_detected_counts_button = QPushButton("Apply detected counts")
+        self.apply_detected_counts_button.clicked.connect(self.apply_detected_counts_to_selected_nucleus)
+        dot_controls.addWidget(self.apply_detected_counts_button)
+
+        self.clear_dot_candidates_button = QPushButton("Clear dot candidates")
+        self.clear_dot_candidates_button.clicked.connect(self.clear_dot_candidates_for_selected_nucleus)
+        dot_controls.addWidget(self.clear_dot_candidates_button)
+        right.addLayout(dot_controls)
+
+        self.dot_candidates_label = QLabel("Dot candidates: select a nucleus, then Detect dots")
+        self.dot_candidates_label.setWordWrap(True)
+        right.addWidget(self.dot_candidates_label)
 
         self.selected_nucleus_label = QLabel()
         self.selected_nucleus_label.setWordWrap(True)
@@ -248,6 +269,56 @@ class MainWindow(QMainWindow):
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()
         self.update_score()
+
+    def _selected_image_path(self) -> str:
+        return self.project.image_path or self.viewer.image_path
+
+    def detect_dots_for_selected_nucleus(self) -> None:
+        nucleus, row = self._selected_nucleus_and_row()
+        if nucleus is None or row is None:
+            self.statusBar().showMessage("Select one nucleus before detecting dots")
+            return
+        image_path = self._selected_image_path()
+        if not image_path or not Path(image_path).exists():
+            QMessageBox.warning(self, "Detect dots", "Open an image before detecting dots.")
+            return
+        image = Image.open(image_path).convert("RGB")
+        params = DEFAULT_DOT_DETECTION_PARAMS
+        nucleus.black_dot_candidates = detect_black_dots(
+            image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
+        )
+        nucleus.red_dot_candidates = detect_red_dots(
+            image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
+        )
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
+        self.statusBar().showMessage(
+            f"Detected candidates for nucleus #{nucleus.nucleus_id}: "
+            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}"
+        )
+
+    def apply_detected_counts_to_selected_nucleus(self) -> None:
+        nucleus, row = self._selected_nucleus_and_row()
+        if nucleus is None or row is None:
+            self.statusBar().showMessage("Select one nucleus before applying detected counts")
+            return
+        nucleus.her2_black = len(nucleus.black_dot_candidates)
+        nucleus.cep17_red = len(nucleus.red_dot_candidates)
+        self._refresh_after_selected_nucleus_edit(row)
+        self.statusBar().showMessage(
+            f"Applied detected counts to nucleus #{nucleus.nucleus_id}; manual edits remain enabled"
+        )
+
+    def clear_dot_candidates_for_selected_nucleus(self) -> None:
+        nucleus, row = self._selected_nucleus_and_row()
+        if nucleus is None or row is None:
+            self.statusBar().showMessage("Select one nucleus before clearing dot candidates")
+            return
+        nucleus.black_dot_candidates.clear()
+        nucleus.red_dot_candidates.clear()
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
+        self.statusBar().showMessage(f"Cleared dot candidates for nucleus #{nucleus.nucleus_id}")
 
     def save_project_as(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save JSON project", "her2-dish-project.json", "JSON (*.json)")
@@ -409,6 +480,7 @@ class MainWindow(QMainWindow):
         nucleus = next((n for n in self.project.nuclei if n.nucleus_id == self.selected_nucleus_id), None)
         if nucleus is None:
             self.selected_nucleus_label.setText("Selected nucleus: none")
+            self.dot_candidates_label.setText("Dot candidates: select a nucleus, then Detect dots")
             return
         status = "included" if nucleus.included else "excluded"
         self.selected_nucleus_label.setText(
@@ -421,8 +493,15 @@ class MainWindow(QMainWindow):
                     f"Large cluster: {nucleus.large_cluster_count}",
                     f"Manual HER2 add: {nucleus.manual_cluster_add}",
                     f"Effective HER2: {nucleus.effective_her2}",
+                    f"Detected HER2 candidates: {len(nucleus.black_dot_candidates)}",
+                    f"Detected CEP17 candidates: {len(nucleus.red_dot_candidates)}",
                 ]
             )
+        )
+        self.dot_candidates_label.setText(
+            f"Dot candidates for selected nucleus: "
+            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}. "
+            "Use Apply detected counts to copy candidates into editable final count fields."
         )
 
     def _append_row(self, nucleus: NucleusCount) -> None:

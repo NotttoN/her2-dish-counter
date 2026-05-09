@@ -27,6 +27,8 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                 "cep17_red",
                 "included",
                 "comment",
+                "detected_black_dot_count",
+                "detected_red_dot_count",
             ]
         )
         for n in rows:
@@ -45,6 +47,8 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                     n.cep17_red,
                     n.included,
                     n.comment,
+                    len(n.black_dot_candidates),
+                    len(n.red_dot_candidates),
                 ]
             )
 
@@ -148,13 +152,25 @@ def _draw_nucleus(draw, nucleus: NucleusCount, offset: tuple[int, int], bounds: 
         outline=outline,
         bounds=bounds,
     )
+    for candidate, dot_outline in [
+        *((candidate, "deepskyblue") for candidate in nucleus.black_dot_candidates),
+        *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
+    ]:
+        dot_radius = max(2.0, min(5.0, (float(candidate.area) ** 0.5) / 2.0))
+        dot_x = candidate.x + ox
+        dot_y = candidate.y + oy
+        draw.ellipse(
+            (dot_x - dot_radius, dot_y - dot_radius, dot_x + dot_radius, dot_y + dot_radius),
+            outline=dot_outline,
+            width=2,
+        )
 
 
 def _draw_summary_panel(draw, panel_box: tuple[int, int, int, int], score: ScoreResult) -> None:
     panel_left, panel_top, panel_right, panel_bottom = panel_box
     panel_padding = 18
     line_gap = 6
-    title = "HER2-DISH Counter v0.1.4"
+    title = "HER2-DISH Counter v0.2.0"
     summary_lines = score_summary_lines(score)
     max_text_width = panel_right - panel_left - 2 * panel_padding
 
@@ -181,7 +197,7 @@ def _summary_panel_height(draw, width: int, score: ScoreResult) -> int:
     panel_padding = 18
     line_gap = 6
     max_text_width = width - 2 * panel_padding
-    panel_lines = ["HER2-DISH Counter v0.1.4", *score_summary_lines(score)]
+    panel_lines = ["HER2-DISH Counter v0.2.0", *score_summary_lines(score)]
     panel_lines.extend(_wrap_text(draw, RESEARCH_USE_DISCLAIMER, max_text_width))
     line_height = max(_text_size(draw, line)[1] for line in panel_lines) + line_gap
     title_spacing = 4
@@ -203,7 +219,7 @@ def export_annotated_png(project: CaseProject, path: str | Path, canvas_size: tu
     scratch = Image.new("RGB", (1, 1), "white")
     scratch_draw = ImageDraw.Draw(scratch)
     longest_required_line = max(
-        ["HER2-DISH Counter v0.1.4", *score_summary_lines(score), RESEARCH_USE_DISCLAIMER],
+        ["HER2-DISH Counter v0.2.0", *score_summary_lines(score), RESEARCH_USE_DISCLAIMER],
         key=lambda line: _text_size(scratch_draw, line)[0],
     )
     min_panel_width = _text_size(scratch_draw, longest_required_line)[0] + 36
