@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractSpinBox,
     QCheckBox,
     QFileDialog,
     QHBoxLayout,
@@ -18,6 +21,9 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QAbstractItemView,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -75,6 +81,7 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
         self._build_ui()
+        self._build_shortcuts()
         self.update_selected_nucleus_panel()
         self.update_score()
 
@@ -162,6 +169,36 @@ class MainWindow(QMainWindow):
         disclaimer.setWordWrap(True)
         disclaimer.setStyleSheet("color: #666;")
         right.addWidget(disclaimer)
+
+
+    def _build_shortcuts(self) -> None:
+        """Register nucleus-edit shortcuts on the main window and children."""
+        self._nucleus_shortcuts: list[QShortcut] = []
+        for key_sequence, handler in [
+            ("B", lambda: self._increment_selected_nucleus_count("her2_black", 1)),
+            ("Shift+B", lambda: self._increment_selected_nucleus_count("her2_black", -1)),
+            ("R", lambda: self._increment_selected_nucleus_count("cep17_red", 1)),
+            ("Shift+R", lambda: self._increment_selected_nucleus_count("cep17_red", -1)),
+            ("S", lambda: self._increment_selected_nucleus_count("small_cluster_count", 1)),
+            ("Shift+S", lambda: self._increment_selected_nucleus_count("small_cluster_count", -1)),
+            ("L", lambda: self._increment_selected_nucleus_count("large_cluster_count", 1)),
+            ("Shift+L", lambda: self._increment_selected_nucleus_count("large_cluster_count", -1)),
+            ("I", self._toggle_selected_nucleus_included),
+            ("Delete", self.remove_selected_nucleus),
+        ]:
+            shortcut = QShortcut(QKeySequence(key_sequence), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(handler)
+            self._nucleus_shortcuts.append(shortcut)
+
+    def _shortcut_should_be_ignored(self, *, ignore_spin_box_focus: bool = False) -> bool:
+        """Avoid changing counts while the user is directly editing cell text/numbers."""
+        focus_widget = QApplication.focusWidget()
+        if focus_widget is None:
+            return False
+        if isinstance(focus_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            return True
+        return ignore_spin_box_focus and isinstance(focus_widget, QAbstractSpinBox)
 
     def _apply_count_table_column_widths(self) -> None:
         """Apply compact initial widths for the nucleus count table UI."""
@@ -285,6 +322,88 @@ class MainWindow(QMainWindow):
             self.select_nucleus_by_id(self.project.nuclei[rows[0]].nucleus_id)
         else:
             self.select_nucleus_by_id(None)
+
+
+    def _selected_nucleus_and_row(self) -> tuple[NucleusCount, int] | tuple[None, None]:
+        if self.selected_nucleus_id is not None:
+            row = self._row_for_nucleus_id(self.selected_nucleus_id)
+            if row is not None:
+                return self.project.nuclei[row], row
+        row = self.table.currentRow()
+        if 0 <= row < len(self.project.nuclei):
+            nucleus = self.project.nuclei[row]
+            self.selected_nucleus_id = nucleus.nucleus_id
+            return nucleus, row
+        return None, None
+
+    def _increment_selected_nucleus_count(self, field_name: str, delta: int) -> None:
+        if self._shortcut_should_be_ignored():
+            return
+        nucleus, row = self._selected_nucleus_and_row()
+        if nucleus is None or row is None:
+            return
+        current_value = int(getattr(nucleus, field_name))
+        setattr(nucleus, field_name, max(0, current_value + delta))
+        self._refresh_after_selected_nucleus_edit(row)
+
+    def _toggle_selected_nucleus_included(self) -> None:
+        if self._shortcut_should_be_ignored():
+            return
+        nucleus, row = self._selected_nucleus_and_row()
+        if nucleus is None or row is None:
+            return
+        nucleus.included = not nucleus.included
+        self._refresh_after_selected_nucleus_edit(row)
+
+    def remove_selected_nucleus(self) -> None:
+        if self._shortcut_should_be_ignored(ignore_spin_box_focus=True):
+            return
+        nucleus, row = self._selected_nucleus_and_row()
+        if nucleus is None or row is None:
+            return
+        del self.project.nuclei[row]
+        for index, remaining_nucleus in enumerate(self.project.nuclei, start=1):
+            remaining_nucleus.nucleus_id = index
+        self.selected_nucleus_id = None
+        self.refresh_table_from_project()
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
+        self.update_score()
+
+    def _refresh_after_selected_nucleus_edit(self, row: int) -> None:
+        self._refresh_table_row_from_nucleus(row)
+        self._sync_table_selection_to_selected_nucleus()
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
+        self.update_score()
+
+    def _refresh_table_row_from_nucleus(self, row: int) -> None:
+        if not 0 <= row < len(self.project.nuclei):
+            return
+        nucleus = self.project.nuclei[row]
+        self._updating_table = True
+        for column, value in [(0, str(nucleus.nucleus_id)), (7, str(nucleus.effective_her2))]:
+            item = self.table.item(row, column)
+            if item is not None:
+                item.setText(value)
+        for column, value in [
+            (3, nucleus.her2_black),
+            (4, nucleus.small_cluster_count),
+            (5, nucleus.large_cluster_count),
+            (6, nucleus.manual_cluster_add),
+            (8, nucleus.cep17_red),
+        ]:
+            widget = self.table.cellWidget(row, column)
+            if isinstance(widget, QSpinBox):
+                blocker = QSignalBlocker(widget)
+                widget.setValue(int(value))
+                del blocker
+        included_widget = self.table.cellWidget(row, 9)
+        if isinstance(included_widget, QCheckBox):
+            blocker = QSignalBlocker(included_widget)
+            included_widget.setChecked(nucleus.included)
+            del blocker
+        self._updating_table = False
 
     def update_selected_nucleus_panel(self) -> None:
         nucleus = next((n for n in self.project.nuclei if n.nucleus_id == self.selected_nucleus_id), None)
