@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .dot_detection import DotCandidate
+
 
 @dataclass
 class RoiRectangle:
@@ -72,6 +74,8 @@ class NucleusCount:
     cluster_note: str = ""
     included: bool = True
     comment: str = ""
+    black_dot_candidates: list[DotCandidate] = field(default_factory=list)
+    red_dot_candidates: list[DotCandidate] = field(default_factory=list)
 
     @property
     def effective_her2(self) -> int:
@@ -100,6 +104,12 @@ class NucleusCount:
         payload.setdefault("cluster_note", "")
         payload.setdefault("included", True)
         payload.setdefault("comment", "")
+        payload["black_dot_candidates"] = [
+            DotCandidate.from_dict(item, "black") for item in (payload.get("black_dot_candidates") or [])
+        ]
+        payload["red_dot_candidates"] = [
+            DotCandidate.from_dict(item, "red") for item in (payload.get("red_dot_candidates") or [])
+        ]
         return cls(**payload)
 
 

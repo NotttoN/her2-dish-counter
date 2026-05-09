@@ -116,6 +116,28 @@ class ImageViewer(QGraphicsView):
             text.setZValue(13 if is_selected else 11)
             self._scene.addItem(text)
             self._overlay_items.extend([ellipse, text])
+        self._draw_selected_dot_candidates()
+
+    def _draw_selected_dot_candidates(self) -> None:
+        if self._selected_nucleus_id is None:
+            return
+        nucleus = next((n for n in self._drawn_nuclei if n.nucleus_id == self._selected_nucleus_id), None)
+        if nucleus is None:
+            return
+        for candidate, color_name in [
+            *((candidate, "deepskyblue") for candidate in nucleus.black_dot_candidates),
+            *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
+        ]:
+            radius = max(3.0, min(8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
+            dot = QGraphicsEllipseItem(candidate.x - radius, candidate.y - radius, radius * 2.0, radius * 2.0)
+            pen = QPen(QColor(color_name), 2)
+            dot.setPen(pen)
+            dot.setBrush(Qt.BrushStyle.NoBrush)
+            dot.setData(1, candidate.color_type)
+            dot.setToolTip(f"{candidate.color_type} dot candidate: area={candidate.area:.1f}")
+            dot.setZValue(20)
+            self._scene.addItem(dot)
+            self._overlay_items.append(dot)
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - Qt override
         if not self.has_image():
