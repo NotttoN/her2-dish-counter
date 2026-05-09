@@ -13,6 +13,7 @@ class ImageViewer(QGraphicsView):
     """Zoomable/pannable image viewer that emits image-coordinate clicks and ROIs."""
 
     nucleusClicked = Signal(float, float)
+    nucleusSelected = Signal(int)
     roiChanged = Signal(object)
     statusChanged = Signal(str)
 
@@ -36,6 +37,8 @@ class ImageViewer(QGraphicsView):
         self._roi_start: QPointF | None = None
         self._drawing_roi = False
         self._overlay_items: list[object] = []
+        self._drawn_nuclei: list[NucleusCount] = []
+        self._selected_nucleus_id: int | None = None
         self._roi: RoiRectangle | None = None
 
     @property
@@ -59,6 +62,8 @@ class ImageViewer(QGraphicsView):
         pixmap = QPixmap.fromImage(image)
         self._scene.clear()
         self._overlay_items.clear()
+        self._drawn_nuclei.clear()
+        self._selected_nucleus_id = None
         self._roi_item = None
         self._pixmap_item = self._scene.addPixmap(pixmap)
         self._pixmap_item.setZValue(0)
@@ -80,13 +85,18 @@ class ImageViewer(QGraphicsView):
             )
             self._roi_item.setZValue(5)
 
-    def draw_nuclei(self, nuclei: list[NucleusCount]) -> None:
+    def draw_nuclei(self, nuclei: list[NucleusCount], selected_nucleus_id: int | None = None) -> None:
+        self._drawn_nuclei = list(nuclei)
+        self._selected_nucleus_id = selected_nucleus_id
         for item in self._overlay_items:
             self._scene.removeItem(item)
         self._overlay_items.clear()
         for nucleus in nuclei:
-            color = QColor("lime") if nucleus.included else QColor("gray")
-            pen = QPen(color, 3)
+            is_selected = nucleus.nucleus_id == selected_nucleus_id
+            color = QColor("yellow") if is_selected else QColor("lime") if nucleus.included else QColor("gray")
+            pen = QPen(color, 5 if is_selected else 3)
+            if not nucleus.included and not is_selected:
+                pen.setStyle(Qt.PenStyle.DashLine)
             ellipse = QGraphicsEllipseItem(
                 nucleus.x - nucleus.radius_x,
                 nucleus.y - nucleus.radius_y,
@@ -94,12 +104,16 @@ class ImageViewer(QGraphicsView):
                 nucleus.radius_y * 2,
             )
             ellipse.setPen(pen)
-            ellipse.setZValue(10)
+            ellipse.setData(0, nucleus.nucleus_id)
+            ellipse.setToolTip(f"Nucleus #{nucleus.nucleus_id}")
+            ellipse.setZValue(12 if is_selected else 10)
             self._scene.addItem(ellipse)
             text = QGraphicsSimpleTextItem(f"#{nucleus.nucleus_id} H{nucleus.effective_her2}/C{nucleus.cep17_red}")
             text.setBrush(color)
+            text.setData(0, nucleus.nucleus_id)
+            text.setToolTip(f"Nucleus #{nucleus.nucleus_id}")
             text.setPos(nucleus.x + nucleus.radius_x + 3, nucleus.y - nucleus.radius_y)
-            text.setZValue(11)
+            text.setZValue(13 if is_selected else 11)
             self._scene.addItem(text)
             self._overlay_items.extend([ellipse, text])
 
@@ -126,7 +140,30 @@ class ImageViewer(QGraphicsView):
             self._drawing_roi = True
             self.set_roi(RoiRectangle(image_pos.x(), image_pos.y(), 0, 0))
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            nucleus_id = self._nucleus_id_at_viewport_position(event.position(), image_pos)
+            if nucleus_id is not None:
+                self.nucleusSelected.emit(nucleus_id)
+                return
         super().mousePressEvent(event)
+
+    def _nucleus_id_at_viewport_position(self, viewport_pos: QPoint | QPointF, image_pos: QPointF | None) -> int | None:
+        scene_pos = self.scene_position_from_viewport_position(viewport_pos)
+        if scene_pos is not None:
+            for item in self._scene.items(scene_pos):
+                nucleus_id = item.data(0)
+                if isinstance(nucleus_id, int):
+                    return nucleus_id
+        if image_pos is None:
+            return None
+        for nucleus in reversed(self._drawn_nuclei):
+            radius_x = nucleus.radius_x or 1.0
+            radius_y = nucleus.radius_y or 1.0
+            dx = (image_pos.x() - nucleus.x) / radius_x
+            dy = (image_pos.y() - nucleus.y) / radius_y
+            if dx * dx + dy * dy <= 1.0:
+                return nucleus.nucleus_id
+        return None
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
         image_pos = self.image_position_from_viewport_position(event.position())

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QAbstractItemView,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -61,18 +62,20 @@ TABLE_COLUMN_WIDTHS = {
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.1.4."""
+    """Main window for HER2-DISH Counter v0.1.5."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.1.4")
+        self.setWindowTitle("HER2-DISH Counter v0.1.5")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
         self._updating_table = False
+        self.selected_nucleus_id: int | None = None
 
         self._build_menu()
         self._build_ui()
+        self.update_selected_nucleus_panel()
         self.update_score()
 
     def _build_menu(self) -> None:
@@ -90,7 +93,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.1.4")
+        title = QLabel("HER2-DISH Counter v0.1.5")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -108,6 +111,7 @@ class MainWindow(QMainWindow):
 
         self.viewer = ImageViewer(self)
         self.viewer.nucleusClicked.connect(self.add_nucleus_at)
+        self.viewer.nucleusSelected.connect(self.select_nucleus_by_id)
         self.viewer.roiChanged.connect(self.set_roi)
         self.viewer.statusChanged.connect(self.statusBar().showMessage)
         splitter.addWidget(self.viewer)
@@ -121,7 +125,10 @@ class MainWindow(QMainWindow):
         self.table.setHorizontalHeaderLabels(TABLE_HEADERS)
         self._apply_count_table_column_widths()
         self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.itemChanged.connect(self._table_item_changed)
+        self.table.itemSelectionChanged.connect(self._table_selection_changed)
         right.addWidget(self.table)
 
         controls = QHBoxLayout()
@@ -139,6 +146,13 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.roi_mode_label)
         controls.addStretch(1)
         right.addLayout(controls)
+
+        self.selected_nucleus_label = QLabel()
+        self.selected_nucleus_label.setWordWrap(True)
+        self.selected_nucleus_label.setStyleSheet(
+            "background: #fff8c5; border: 1px solid #d6b300; padding: 6px;"
+        )
+        right.addWidget(self.selected_nucleus_label)
 
         self.summary_label = QLabel()
         self.summary_label.setWordWrap(True)
@@ -175,7 +189,7 @@ class MainWindow(QMainWindow):
             return
         self.project.image_path = path
         self.viewer.set_roi(self.project.roi)
-        self.viewer.draw_nuclei(self.project.nuclei)
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
 
     def open_project(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open JSON project", "", "JSON (*.json)")
@@ -191,9 +205,11 @@ class MainWindow(QMainWindow):
                 self.viewer.load_image(self.project.image_path)
             except ValueError:
                 pass
+        self.selected_nucleus_id = None
         self.refresh_table_from_project()
         self.viewer.set_roi(self.project.roi)
-        self.viewer.draw_nuclei(self.project.nuclei)
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
         self.update_score()
 
     def save_project_as(self) -> None:
@@ -230,8 +246,65 @@ class MainWindow(QMainWindow):
         nucleus = NucleusCount(nucleus_id=len(self.project.nuclei) + 1, x=float(x), y=float(y))
         self.project.nuclei.append(nucleus)
         self._append_row(nucleus)
-        self.viewer.draw_nuclei(self.project.nuclei)
+        self.select_nucleus_by_id(nucleus.nucleus_id)
         self.update_score()
+
+    def select_nucleus_by_id(self, nucleus_id: int | None) -> None:
+        if nucleus_id is not None and not any(n.nucleus_id == nucleus_id for n in self.project.nuclei):
+            nucleus_id = None
+        if self.selected_nucleus_id == nucleus_id:
+            self._sync_table_selection_to_selected_nucleus()
+            self.update_selected_nucleus_panel()
+            return
+        self.selected_nucleus_id = nucleus_id
+        self._sync_table_selection_to_selected_nucleus()
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
+
+    def _sync_table_selection_to_selected_nucleus(self) -> None:
+        self._updating_table = True
+        self.table.clearSelection()
+        if self.selected_nucleus_id is not None:
+            row = self._row_for_nucleus_id(self.selected_nucleus_id)
+            if row is not None:
+                self.table.selectRow(row)
+                self.table.setCurrentCell(row, 0)
+        self._updating_table = False
+
+    def _row_for_nucleus_id(self, nucleus_id: int) -> int | None:
+        for row, nucleus in enumerate(self.project.nuclei):
+            if nucleus.nucleus_id == nucleus_id:
+                return row
+        return None
+
+    def _table_selection_changed(self) -> None:
+        if self._updating_table:
+            return
+        rows = sorted({index.row() for index in self.table.selectedIndexes()})
+        if rows and rows[0] < len(self.project.nuclei):
+            self.select_nucleus_by_id(self.project.nuclei[rows[0]].nucleus_id)
+        else:
+            self.select_nucleus_by_id(None)
+
+    def update_selected_nucleus_panel(self) -> None:
+        nucleus = next((n for n in self.project.nuclei if n.nucleus_id == self.selected_nucleus_id), None)
+        if nucleus is None:
+            self.selected_nucleus_label.setText("Selected nucleus: none")
+            return
+        status = "included" if nucleus.included else "excluded"
+        self.selected_nucleus_label.setText(
+            "\n".join(
+                [
+                    f"Selected nucleus: #{nucleus.nucleus_id} ({status})",
+                    f"HER2: {nucleus.her2_black}",
+                    f"CEP17: {nucleus.cep17_red}",
+                    f"Small cluster: {nucleus.small_cluster_count}",
+                    f"Large cluster: {nucleus.large_cluster_count}",
+                    f"Manual HER2 add: {nucleus.manual_cluster_add}",
+                    f"Effective HER2: {nucleus.effective_her2}",
+                ]
+            )
+        )
 
     def _append_row(self, nucleus: NucleusCount) -> None:
         self._updating_table = True
@@ -277,13 +350,17 @@ class MainWindow(QMainWindow):
 
     def remove_selected_rows(self) -> None:
         rows = sorted({idx.row() for idx in self.table.selectedIndexes()}, reverse=True)
+        if not rows:
+            return
         for row in rows:
             if 0 <= row < len(self.project.nuclei):
                 del self.project.nuclei[row]
         for index, nucleus in enumerate(self.project.nuclei, start=1):
             nucleus.nucleus_id = index
+        self.selected_nucleus_id = None
         self.refresh_table_from_project()
-        self.viewer.draw_nuclei(self.project.nuclei)
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
         self.update_score()
 
     def _table_item_changed(self, item: QTableWidgetItem) -> None:
@@ -318,7 +395,8 @@ class MainWindow(QMainWindow):
             effective_item = self.table.item(row, 7)
             if effective_item is not None:
                 effective_item.setText(str(nucleus.effective_her2))
-        self.viewer.draw_nuclei(self.project.nuclei)
+        self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
+        self.update_selected_nucleus_panel()
         self.update_score()
 
     def update_score(self) -> None:
@@ -326,11 +404,13 @@ class MainWindow(QMainWindow):
         ratio = f"{result.her2_cep17_ratio:.3f}" if result.her2_cep17_ratio is not None else "N/A"
         avg = f"{result.average_her2_copy_number:.3f}" if result.average_her2_copy_number is not None else "N/A"
         warnings = "\n".join(f"• {w}" for w in result.warnings) if result.warnings else "None"
+        count_workflow = self._count_workflow_status(result.included_cell_count)
 
         self.summary_label.setText(
             "\n".join(
                 [
                     f"Included nuclei: {result.included_cell_count}",
+                    f"20/40 count workflow: {count_workflow}",
                     f"Total HER2 (effective): {result.total_her2}",
                     f"Total CEP17: {result.total_cep17}",
                     f"HER2/CEP17 ratio: {ratio}",
@@ -340,3 +420,10 @@ class MainWindow(QMainWindow):
                 ]
             )
         )
+
+    def _count_workflow_status(self, included_cell_count: int) -> str:
+        if included_cell_count < 20:
+            return f"{included_cell_count}/20 nuclei counted"
+        if included_cell_count < 40:
+            return f"20-nucleus checkpoint reached ({included_cell_count}/40 if additional counting is needed)"
+        return f"40-nucleus count complete ({included_cell_count}/40)"
