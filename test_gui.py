@@ -220,3 +220,82 @@ def test_excluded_nucleus_uses_gray_dashed_marker(qt_app):
     assert excluded_ellipses
     assert excluded_ellipses[0].pen().color().name().lower() == "#808080"
     assert excluded_ellipses[0].pen().style() == Qt.PenStyle.DashLine
+
+
+def test_keyboard_shortcuts_update_selected_table_row(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(10, 20)
+    window.table.selectRow(0)
+    window.show()
+    window.table.setFocus()
+    qt_app.processEvents()
+
+    QTest.keyClick(window.table, Qt.Key.Key_B)
+    qt_app.processEvents()
+    assert window.project.nuclei[0].her2_black == 1
+    assert window.table.cellWidget(0, 3).value() == 1
+    assert window.table.item(0, 7).text() == "1"
+
+    QTest.keyClick(window.table, Qt.Key.Key_B, Qt.KeyboardModifier.ShiftModifier)
+    qt_app.processEvents()
+    assert window.project.nuclei[0].her2_black == 0
+    assert window.table.cellWidget(0, 3).value() == 0
+
+    QTest.keyClick(window.table, Qt.Key.Key_R)
+    qt_app.processEvents()
+    assert window.project.nuclei[0].cep17_red == 1
+    assert window.table.cellWidget(0, 8).value() == 1
+
+    QTest.keyClick(window.table, Qt.Key.Key_S)
+    qt_app.processEvents()
+    assert window.project.nuclei[0].small_cluster_count == 1
+    assert window.project.nuclei[0].effective_her2 == 6
+    assert window.table.item(0, 7).text() == "6"
+    assert "Total HER2 (effective): 6" in window.summary_label.text()
+
+    QTest.keyClick(window.table, Qt.Key.Key_L)
+    qt_app.processEvents()
+    assert window.project.nuclei[0].large_cluster_count == 1
+    assert window.project.nuclei[0].effective_her2 == 18
+    assert window.table.item(0, 7).text() == "18"
+    assert "Total HER2 (effective): 18" in window.summary_label.text()
+
+    QTest.keyClick(window.table, Qt.Key.Key_I)
+    qt_app.processEvents()
+    assert not window.project.nuclei[0].included
+    assert not window.table.cellWidget(0, 9).isChecked()
+    assert "Included nuclei: 0" in window.summary_label.text()
+
+    QTest.keyClick(window.table, Qt.Key.Key_Delete)
+    qt_app.processEvents()
+    assert window.project.nuclei == []
+    assert window.table.rowCount() == 0
+    assert "Included nuclei: 0" in window.summary_label.text()
+
+
+def test_keyboard_shortcuts_update_selected_viewer_marker(qt_app, tmp_path):
+    image_path = tmp_path / "source.png"
+    _write_image(image_path)
+
+    window = MainWindow()
+    window.viewer.resize(640, 480)
+    window.viewer.load_image(image_path)
+    window.add_nucleus_at(80, 90)
+    window.add_nucleus_at(150, 140)
+    window.viewer.set_mode(ImageViewer.MODE_PAN)
+    window.show()
+    qt_app.processEvents()
+
+    viewport_pos, _ = _clickable_viewport_point_for_image_position(window.viewer, QPointF(150.0, 140.0))
+    QTest.mouseClick(window.viewer.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, viewport_pos)
+    qt_app.processEvents()
+    assert window.selected_nucleus_id == 2
+
+    QTest.keyClick(window.viewer.viewport(), Qt.Key.Key_B)
+    qt_app.processEvents()
+    assert window.project.nuclei[1].her2_black == 1
+    assert window.table.cellWidget(1, 3).value() == 1
+    assert window.table.item(1, 7).text() == "1"
+    labels = [item for item in window.viewer._overlay_items if item.data(0) == 2 and hasattr(item, "text")]
+    assert labels
+    assert labels[0].text() == "#2 H1/C0"
