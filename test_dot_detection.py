@@ -231,3 +231,60 @@ def test_sensitive_excludes_large_red_dot_outside_nucleus_roi():
 
     assert len(candidates) == 1
     assert candidates[0].x == pytest.approx(60.5, abs=1.0)
+
+
+def test_black_dot_only_is_not_detected_as_cep17_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 4, (15, 15, 15))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert result.candidates == []
+    assert result.overlap_candidates == []
+
+
+def test_red_dot_with_black_overlap_is_review_only_not_cep17():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 7, (220, 20, 70))
+    _dot(draw, (60, 50), 3, (15, 15, 15))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert result.candidates == []
+    assert len(result.overlap_candidates) == 1
+    assert result.overlap_candidates[0].color_type == "overlap_review"
+    assert result.stats.overlap_review_candidates == 1
+
+
+def test_large_irregular_red_dot_is_one_cep17_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    draw.ellipse((45, 42, 72, 57), fill=(220, 20, 70))
+    draw.polygon([(58, 38), (78, 49), (61, 60)], fill=(220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].color_type == "large_red"
+    assert result.overlap_candidates == []
+
+
+def test_black_split_red_component_is_not_overcounted_as_multiple_cep17():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    draw.ellipse((48, 42, 72, 58), fill=(220, 20, 70))
+    draw.rectangle((58, 41, 62, 59), fill=(15, 15, 15))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert len(result.candidates) <= 1
