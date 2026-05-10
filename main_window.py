@@ -96,11 +96,11 @@ TABLE_COLUMN_WIDTHS = {
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.2.2."""
+    """Main window for HER2-DISH Counter v0.2.5."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.2.2")
+        self.setWindowTitle("HER2-DISH Counter v0.2.5")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.2.2")
+        title = QLabel("HER2-DISH Counter v0.2.5")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -333,13 +333,15 @@ class MainWindow(QMainWindow):
             image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
         )
         nucleus.red_dot_candidates = red_result.candidates
+        nucleus.overlap_dot_candidates = red_result.overlap_candidates
         self.last_red_detection_stats = red_result.stats
         self.last_red_detection_nucleus_id = nucleus.nucleus_id
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()
         self.statusBar().showMessage(
             f"Detected candidates for nucleus #{nucleus.nucleus_id}: "
-            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}"
+            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
+            f"overlap review={len(nucleus.overlap_dot_candidates)}"
         )
 
     def apply_detected_counts_to_selected_nucleus(self) -> None:
@@ -350,13 +352,17 @@ class MainWindow(QMainWindow):
         nucleus.her2_black = len(nucleus.black_dot_candidates)
         nucleus.cep17_red = len(nucleus.red_dot_candidates)
         large_red_count = self._large_red_candidate_count(nucleus)
+        overlap_count = len(nucleus.overlap_dot_candidates)
         self._refresh_after_selected_nucleus_edit(row)
-        large_red_note = (
-            "; large red candidate included; please review manually" if large_red_count else ""
-        )
+        review_notes = []
+        if large_red_count:
+            review_notes.append("large red candidate included as 1; please review manually")
+        if overlap_count:
+            review_notes.append("overlap review candidates not applied")
+        review_note = f"; {'; '.join(review_notes)}" if review_notes else ""
         self.statusBar().showMessage(
             f"Applied detected counts to nucleus #{nucleus.nucleus_id}; manual edits remain enabled"
-            f"{large_red_note}"
+            f"{review_note}"
         )
 
     def clear_dot_candidates_for_selected_nucleus(self) -> None:
@@ -366,6 +372,7 @@ class MainWindow(QMainWindow):
             return
         nucleus.black_dot_candidates.clear()
         nucleus.red_dot_candidates.clear()
+        nucleus.overlap_dot_candidates.clear()
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
@@ -422,6 +429,7 @@ class MainWindow(QMainWindow):
         nucleus.radius_y = float(radius_y)
         nucleus.black_dot_candidates.clear()
         nucleus.red_dot_candidates.clear()
+        nucleus.overlap_dot_candidates.clear()
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
         self._refresh_after_selected_nucleus_edit(row)
@@ -579,15 +587,19 @@ class MainWindow(QMainWindow):
                     f"Effective HER2: {nucleus.effective_her2}",
                     f"Detected HER2 candidates: {len(nucleus.black_dot_candidates)}",
                     f"Detected CEP17 candidates: {len(nucleus.red_dot_candidates)}",
+                    f"Overlap review candidates: {len(nucleus.overlap_dot_candidates)}",
+                    f"Large red candidates: {self._large_red_candidate_count(nucleus)}",
                     *red_debug_lines,
                 ]
             )
         )
         self.dot_candidates_label.setText(
             f"Dot candidates for selected nucleus: "
-            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}"
-            f" (large red={self._large_red_candidate_count(nucleus)}). "
-            "Use Apply detected counts to copy candidates into editable final count fields."
+            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
+            f"overlap review={len(nucleus.overlap_dot_candidates)} "
+            f"(large red={self._large_red_candidate_count(nucleus)}). "
+            "Overlap candidates are not automatically applied. "
+            "Please adjust HER2/CEP17 manually if needed."
         )
 
     def _red_debug_lines(self, nucleus: NucleusCount) -> list[str]:
@@ -601,6 +613,8 @@ class MainWindow(QMainWindow):
             f"Red candidates after area filter: {stats.area_pass_components}",
             f"Red candidates after circularity filter: {stats.circularity_pass_components}",
             f"Large red candidates: {stats.large_red_candidates}",
+            f"Overlap review candidates: {stats.overlap_review_candidates}",
+            "Note: Overlap review candidates are not automatically applied.",
         ]
 
     def _large_red_candidate_count(self, nucleus: NucleusCount) -> int:

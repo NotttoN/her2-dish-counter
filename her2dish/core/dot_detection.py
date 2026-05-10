@@ -64,13 +64,15 @@ class ComponentDetectionStats:
     roi_pass_components: int = 0
     detected_candidates: int = 0
     large_red_candidates: int = 0
+    overlap_review_candidates: int = 0
 
 
 @dataclass(frozen=True)
 class RedDotDetectionResult:
-    """CEP17 detection candidates with red-mask debug counters."""
+    """CEP17 and red/black-overlap review candidates with red-mask debug counters."""
 
     candidates: list[DotCandidate]
+    overlap_candidates: list[DotCandidate]
     stats: ComponentDetectionStats
     params: DotDetectionParams
 
@@ -168,7 +170,7 @@ def detect_red_dots_with_debug(
     """Detect CEP17 dots and return red-mask counters for troubleshooting."""
 
     p = params or DEFAULT_DOT_DETECTION_PARAMS
-    candidates, stats = _detect_red_components(
+    candidates, overlap_candidates, stats = _detect_red_components(
         image_rgb,
         nucleus_x,
         nucleus_y,
@@ -176,7 +178,12 @@ def detect_red_dots_with_debug(
         radius_y,
         p,
     )
-    return RedDotDetectionResult(candidates=candidates, stats=stats, params=p)
+    return RedDotDetectionResult(
+        candidates=candidates,
+        overlap_candidates=overlap_candidates,
+        stats=stats,
+        params=p,
+    )
 
 
 def _detect_components(
@@ -264,18 +271,31 @@ def _detect_red_components(
     radius_x: float,
     radius_y: float,
     params: DotDetectionParams,
-) -> tuple[list[DotCandidate], ComponentDetectionStats]:
-    """Detect CEP17 candidates while retaining larger/fused red components.
+) -> tuple[list[DotCandidate], list[DotCandidate], ComponentDetectionStats]:
+    """Detect CEP17 candidates while separating red/black overlap reviews.
 
     Red CEP17 candidates are intentionally semi-automatic suggestions. Large or
-    low-circularity components are not converted to multiple counts unless a
-    simple distance-peak split finds clearly separated maxima; otherwise they are
-    kept as ``large_red`` review candidates that count as one when applied.
+    low-circularity red components are treated as one CEP17 candidate by default;
+    black-dominant or mixed components near HER2 black pixels are removed from
+    normal red counts and, when enough red/magenta signal surrounds them, are
+    returned as ``overlap_review`` display-only candidates.
     """
 
     pixels, width, height = _coerce_rgb_pixels(image_rgb)
     if radius_x <= 0 or radius_y <= 0 or width <= 0 or height <= 0:
-        return [], ComponentDetectionStats()
+        return [], [], ComponentDetectionStats()
+
+    black_mask = _component_mask(
+        pixels,
+        width,
+        height,
+        nucleus_x,
+        nucleus_y,
+        radius_x,
+        radius_y,
+        lambda r, g, b: _is_black_candidate_pixel(r, g, b, params),
+    )
+    black_components = _components_from_mask(black_mask)
 
     mask = _component_mask(
         pixels,
@@ -289,6 +309,7 @@ def _detect_red_components(
     )
 
     candidates: list[DotCandidate] = []
+    overlap_candidates: list[DotCandidate] = []
     visited: set[tuple[int, int]] = set()
     connected_components = 0
     area_pass_components = 0
@@ -317,24 +338,24 @@ def _detect_red_components(
         roi_pass_components += 1
 
         component_pixels = [pixels[y][x] for x, y in component]
+        metrics = _component_color_metrics(component, pixels, width, height)
         base_confidence = _red_confidence(component_pixels, params)
         confidence = max(0.0, min(1.0, base_confidence * (0.70 + 0.30 * min(1.0, circularity))))
         is_large = area >= params.red_large_min_area or not circularity_passed
-
-        split_peaks = _component_distance_peaks(component, params.red_peak_min_distance)
-        if is_large and len(split_peaks) >= 2:
-            split_area = area / len(split_peaks)
-            for px, py in split_peaks:
-                if _inside_ellipse(px, py, nucleus_x, nucleus_y, radius_x, radius_y):
-                    candidates.append(
-                        DotCandidate(
-                            x=float(px),
-                            y=float(py),
-                            area=split_area,
-                            confidence=confidence,
-                            color_type="red",
-                        )
+        overlaps_black = _component_strongly_overlaps_black(component, cx, cy, black_components)
+        black_dominant = metrics["black_score"] >= metrics["red_score"] * 1.15 and metrics["dark_ratio"] >= 0.25
+        mixed_overlap = overlaps_black and metrics["red_ratio"] >= 0.12 and metrics["dark_ratio"] >= 0.08
+        if black_dominant or mixed_overlap:
+            if metrics["red_ratio"] >= 0.12:
+                overlap_candidates.append(
+                    DotCandidate(
+                        x=float(cx),
+                        y=float(cy),
+                        area=area,
+                        confidence=max(confidence, min(1.0, metrics["red_score"])),
+                        color_type="overlap_review",
                     )
+                )
             continue
 
         color_type = "large_red" if is_large else "red"
@@ -351,6 +372,7 @@ def _detect_red_components(
         )
 
     candidates.sort(key=lambda c: (c.y, c.x))
+    overlap_candidates.sort(key=lambda c: (c.y, c.x))
     stats = ComponentDetectionStats(
         mask_pixels=len(mask),
         connected_components=connected_components,
@@ -359,8 +381,90 @@ def _detect_red_components(
         roi_pass_components=roi_pass_components,
         detected_candidates=len(candidates),
         large_red_candidates=large_red_candidates,
+        overlap_review_candidates=len(overlap_candidates),
     )
-    return candidates, stats
+    return candidates, overlap_candidates, stats
+
+
+def _components_from_mask(mask: set[tuple[int, int]]) -> list[list[tuple[int, int]]]:
+    visited: set[tuple[int, int]] = set()
+    components: list[list[tuple[int, int]]] = []
+    for seed in list(mask):
+        if seed not in visited:
+            components.append(_flood_component(seed, mask, visited))
+    return components
+
+
+def _component_strongly_overlaps_black(
+    component: Iterable[tuple[int, int]],
+    cx: float,
+    cy: float,
+    black_components: list[list[tuple[int, int]]],
+) -> bool:
+    points = set(component)
+    if not points:
+        return False
+    for black_component in black_components:
+        black_points = set(black_component)
+        if len(black_points) < 4:
+            continue
+        bx, by = _component_centroid(black_points)
+        black_radius = max(2.5, math.sqrt(len(black_points) / math.pi) + 1.5)
+        center_near_black = (cx - bx) ** 2 + (cy - by) ** 2 <= black_radius * black_radius
+        expanded_black = {
+            (x + dx, y + dy)
+            for x, y in black_points
+            for dx in (-1, 0, 1)
+            for dy in (-1, 0, 1)
+        }
+        red_border_touches_black = bool(points & expanded_black)
+        if center_near_black or red_border_touches_black:
+            return True
+    return False
+
+
+def _component_color_metrics(
+    component: Iterable[tuple[int, int]],
+    pixels: list[list[tuple[int, int, int]]],
+    width: int,
+    height: int,
+) -> dict[str, float]:
+    points = set(component)
+    if not points:
+        return {"red_ratio": 0.0, "dark_ratio": 0.0, "red_score": 0.0, "black_score": 0.0}
+    sample_points = {
+        (x + dx, y + dy)
+        for x, y in points
+        for dx in (-2, -1, 0, 1, 2)
+        for dy in (-2, -1, 0, 1, 2)
+        if 0 <= x + dx < width and 0 <= y + dy < height
+    }
+    if not sample_points:
+        return {"red_ratio": 0.0, "dark_ratio": 0.0, "red_score": 0.0, "black_score": 0.0}
+    red_pixels = 0
+    dark_pixels = 0
+    red_scores: list[float] = []
+    black_scores: list[float] = []
+    for x, y in sample_points:
+        r, g, b = pixels[y][x]
+        hue, saturation, value = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+        hue_opencv = hue * 179.0
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        red_like = ((hue_opencv <= 22.0 or hue_opencv >= 125.0) and saturation >= 0.12 and value >= 0.10)
+        dark_like = luminance <= 0.45 and max(r, g, b) <= 155 and (r - max(g, b)) < 45
+        if red_like:
+            red_pixels += 1
+        if dark_like:
+            dark_pixels += 1
+        red_scores.append(max(0.0, saturation) * max(0.0, value) if red_like else 0.0)
+        black_scores.append(max(0.0, 1.0 - luminance) if dark_like else 0.0)
+    total = len(sample_points)
+    return {
+        "red_ratio": red_pixels / total,
+        "dark_ratio": dark_pixels / total,
+        "red_score": sum(red_scores) / total,
+        "black_score": sum(black_scores) / total,
+    }
 
 
 def _component_mask(

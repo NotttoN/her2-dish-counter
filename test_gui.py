@@ -319,6 +319,7 @@ def test_update_nucleus_roi_updates_table_panel_and_clears_candidates(qt_app):
     assert nucleus.radius_y == pytest.approx(9.0)
     assert nucleus.black_dot_candidates == []
     assert nucleus.red_dot_candidates == []
+    assert nucleus.overlap_dot_candidates == []
     assert window.table.item(0, 1).text() == "70.5"
     assert window.table.item(0, 2).text() == "80.5"
     assert window.table.item(0, 3).text() == "12.0"
@@ -342,7 +343,32 @@ def test_detect_dots_requires_apply_before_cep17_changes(qt_app):
 
     assert nucleus.cep17_red == 1
     assert window.table.cellWidget(0, 10).value() == 1
-    assert "large red candidate included; please review manually" in window.statusBar().currentMessage()
+    assert "large red candidate included as 1; please review manually" in window.statusBar().currentMessage()
     window.table.cellWidget(0, 10).setValue(2)
     qt_app.processEvents()
     assert nucleus.cep17_red == 2
+
+
+def test_apply_detected_counts_excludes_overlap_review_candidates(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(40, 50)
+    nucleus = window.project.nuclei[0]
+    nucleus.her2_black = 5
+    nucleus.cep17_red = 4
+    nucleus.black_dot_candidates.append(type("Candidate", (), {"x": 40, "y": 50, "area": 20, "color_type": "black"})())
+    nucleus.red_dot_candidates.append(type("Candidate", (), {"x": 45, "y": 50, "area": 30, "color_type": "red"})())
+    nucleus.overlap_dot_candidates.append(
+        type("Candidate", (), {"x": 42, "y": 50, "area": 50, "color_type": "overlap_review"})()
+    )
+    window._refresh_after_selected_nucleus_edit(0)
+    qt_app.processEvents()
+
+    assert nucleus.her2_black == 5
+    assert nucleus.cep17_red == 4
+
+    window.apply_detected_counts_to_selected_nucleus()
+    qt_app.processEvents()
+
+    assert nucleus.her2_black == 1
+    assert nucleus.cep17_red == 1
+    assert "overlap review candidates not applied" in window.statusBar().currentMessage()

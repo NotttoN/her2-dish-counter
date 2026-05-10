@@ -77,6 +77,7 @@ class NucleusCount:
     comment: str = ""
     black_dot_candidates: list[DotCandidate] = field(default_factory=list)
     red_dot_candidates: list[DotCandidate] = field(default_factory=list)
+    overlap_dot_candidates: list[DotCandidate] = field(default_factory=list)
 
     @property
     def effective_her2(self) -> int:
@@ -110,6 +111,10 @@ class NucleusCount:
         ]
         payload["red_dot_candidates"] = [
             DotCandidate.from_dict(item, "red") for item in (payload.get("red_dot_candidates") or [])
+        ]
+        payload["overlap_dot_candidates"] = [
+            DotCandidate.from_dict(item, "overlap_review")
+            for item in (payload.get("overlap_dot_candidates") or [])
         ]
         return cls(**payload)
 
