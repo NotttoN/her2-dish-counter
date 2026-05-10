@@ -172,3 +172,62 @@ def test_detection_uses_adjusted_nucleus_roi():
     assert resized == []
     assert len(moved) == 1
     assert moved[0].x == pytest.approx(82.5, abs=1.0)
+
+
+def test_sensitive_detects_large_red_dot_as_review_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 8, (220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert len(result.candidates) == 1
+    assert result.candidates[0].color_type == "large_red"
+    assert result.stats.large_red_candidates == 1
+
+
+def test_sensitive_keeps_irregular_red_dot_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    draw.ellipse((48, 45, 72, 55), fill=(220, 20, 70))
+    draw.rectangle((58, 43, 70, 47), fill=(220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert len(result.candidates) >= 1
+    assert result.stats.area_pass_components >= 1
+
+
+def test_sensitive_splits_or_retains_close_red_dots():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (56, 50), 4, (220, 20, 70))
+    _dot(draw, (64, 50), 4, (220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert len(result.candidates) in {1, 2}
+    if len(result.candidates) == 1:
+        assert result.candidates[0].color_type == "large_red"
+    else:
+        assert {candidate.color_type for candidate in result.candidates} == {"red"}
+
+
+def test_sensitive_excludes_large_red_dot_outside_nucleus_roi():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 8, (220, 20, 70))
+    _dot(draw, (105, 50), 8, (220, 20, 70))
+
+    candidates = detect_red_dots(
+        image, 60, 50, 25, 20, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].x == pytest.approx(60.5, abs=1.0)
