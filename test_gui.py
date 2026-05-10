@@ -324,3 +324,25 @@ def test_update_nucleus_roi_updates_table_panel_and_clears_candidates(qt_app):
     assert window.table.item(0, 3).text() == "12.0"
     assert window.table.item(0, 4).text() == "9.0"
     assert "ROI radii: Rx=12.0, Ry=9.0" in window.selected_nucleus_label.text()
+
+
+def test_detect_dots_requires_apply_before_cep17_changes(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(40, 50)
+    nucleus = window.project.nuclei[0]
+    nucleus.cep17_red = 3
+    nucleus.red_dot_candidates.append(type("Candidate", (), {"x": 42, "y": 50, "area": 160, "color_type": "large_red"})())
+    window._refresh_after_selected_nucleus_edit(0)
+    qt_app.processEvents()
+
+    assert window.table.cellWidget(0, 10).value() == 3
+
+    window.apply_detected_counts_to_selected_nucleus()
+    qt_app.processEvents()
+
+    assert nucleus.cep17_red == 1
+    assert window.table.cellWidget(0, 10).value() == 1
+    assert "large red candidate included; please review manually" in window.statusBar().currentMessage()
+    window.table.cellWidget(0, 10).setValue(2)
+    qt_app.processEvents()
+    assert nucleus.cep17_red == 2

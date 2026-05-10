@@ -349,9 +349,14 @@ class MainWindow(QMainWindow):
             return
         nucleus.her2_black = len(nucleus.black_dot_candidates)
         nucleus.cep17_red = len(nucleus.red_dot_candidates)
+        large_red_count = self._large_red_candidate_count(nucleus)
         self._refresh_after_selected_nucleus_edit(row)
+        large_red_note = (
+            "; large red candidate included; please review manually" if large_red_count else ""
+        )
         self.statusBar().showMessage(
             f"Applied detected counts to nucleus #{nucleus.nucleus_id}; manual edits remain enabled"
+            f"{large_red_note}"
         )
 
     def clear_dot_candidates_for_selected_nucleus(self) -> None:
@@ -580,7 +585,8 @@ class MainWindow(QMainWindow):
         )
         self.dot_candidates_label.setText(
             f"Dot candidates for selected nucleus: "
-            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}. "
+            f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}"
+            f" (large red={self._large_red_candidate_count(nucleus)}). "
             "Use Apply detected counts to copy candidates into editable final count fields."
         )
 
@@ -592,10 +598,13 @@ class MainWindow(QMainWindow):
             f"Red sensitivity: {self.last_red_detection_preset}",
             f"Red mask pixels: {stats.mask_pixels}",
             f"Red connected components: {stats.connected_components}",
-            f"Red area-pass components: {stats.area_pass_components}",
-            f"Red circularity-pass components: {stats.circularity_pass_components}",
-            f"Red ROI-pass components: {stats.roi_pass_components}",
+            f"Red candidates after area filter: {stats.area_pass_components}",
+            f"Red candidates after circularity filter: {stats.circularity_pass_components}",
+            f"Large red candidates: {stats.large_red_candidates}",
         ]
+
+    def _large_red_candidate_count(self, nucleus: NucleusCount) -> int:
+        return sum(1 for candidate in nucleus.red_dot_candidates if candidate.color_type == "large_red")
 
     def _red_sensitivity_changed(self, preset_name: str) -> None:
         self.last_red_detection_preset = preset_name

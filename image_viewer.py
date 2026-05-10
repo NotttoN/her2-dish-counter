@@ -166,9 +166,13 @@ class ImageViewer(QGraphicsView):
             *((candidate, "deepskyblue") for candidate in nucleus.black_dot_candidates),
             *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
         ]:
-            radius = max(3.0, min(8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
+            is_large_red = candidate.color_type == "large_red"
+            radius = max(3.0, min(10.0 if is_large_red else 8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
             dot = QGraphicsEllipseItem(candidate.x - radius, candidate.y - radius, radius * 2.0, radius * 2.0)
-            dot.setPen(QPen(QColor(color_name), 2))
+            pen = QPen(QColor("orange" if is_large_red else color_name), 3 if is_large_red else 2)
+            if is_large_red:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            dot.setPen(pen)
             dot.setBrush(Qt.BrushStyle.NoBrush)
             dot.setData(1, candidate.color_type)
             dot.setToolTip(f"{candidate.color_type} dot candidate: area={candidate.area:.1f}")
