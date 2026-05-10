@@ -8,3 +8,8 @@ BORDERLINE_RATIO_WARNING = (
     "Borderline HER2/CEP17 ratio. Consider counting an additional 20 nuclei according to the laboratory workflow."
 )
 MINIMUM_INITIAL_NUCLEI = 20
+
+DEFAULT_NUCLEUS_RADIUS_X = 25.0
+DEFAULT_NUCLEUS_RADIUS_Y = 18.0
+MIN_NUCLEUS_RADIUS = 5.0
+NUCLEUS_RESIZE_HANDLE_SIZE = 10.0

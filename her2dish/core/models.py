@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .constants import DEFAULT_NUCLEUS_RADIUS_X, DEFAULT_NUCLEUS_RADIUS_Y
 from .dot_detection import DotCandidate
 
 
@@ -64,8 +65,8 @@ class NucleusCount:
     nucleus_id: int
     x: float
     y: float
-    radius_x: float = 25.0
-    radius_y: float = 18.0
+    radius_x: float = DEFAULT_NUCLEUS_RADIUS_X
+    radius_y: float = DEFAULT_NUCLEUS_RADIUS_Y
     her2_black: int = 0
     small_cluster_count: int = 0
     large_cluster_count: int = 0
@@ -93,8 +94,8 @@ class NucleusCount:
     def from_dict(cls, data: dict[str, Any]) -> "NucleusCount":
         payload = dict(data)
         # Be tolerant of older/minimal JSON files.
-        payload.setdefault("radius_x", 25.0)
-        payload.setdefault("radius_y", 18.0)
+        payload.setdefault("radius_x", DEFAULT_NUCLEUS_RADIUS_X)
+        payload.setdefault("radius_y", DEFAULT_NUCLEUS_RADIUS_Y)
         payload.setdefault("her2_black", 0)
         legacy_cluster_value = int(payload.pop("cluster_value", 0))
         payload.setdefault("small_cluster_count", 0)

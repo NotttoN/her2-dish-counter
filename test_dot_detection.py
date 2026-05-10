@@ -92,3 +92,19 @@ def test_json_roundtrip_preserves_dot_candidates(tmp_path):
     assert len(loaded.nuclei[0].red_dot_candidates) == 1
     assert loaded.nuclei[0].black_dot_candidates[0].color_type == "black"
     assert loaded.nuclei[0].red_dot_candidates[0].color_type == "red"
+
+
+def test_detection_uses_adjusted_nucleus_roi():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (40, 50), 3, (15, 15, 15))
+    _dot(draw, (82, 50), 3, (15, 15, 15))
+
+    initial = detect_black_dots(image, nucleus_x=60, nucleus_y=50, radius_x=35, radius_y=25)
+    resized = detect_black_dots(image, nucleus_x=60, nucleus_y=50, radius_x=15, radius_y=25)
+    moved = detect_black_dots(image, nucleus_x=82, nucleus_y=50, radius_x=10, radius_y=10)
+
+    assert len(initial) == 2
+    assert resized == []
+    assert len(moved) == 1
+    assert moved[0].x == pytest.approx(82.5, abs=1.0)

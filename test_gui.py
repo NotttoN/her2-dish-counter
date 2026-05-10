@@ -120,6 +120,8 @@ def test_count_table_cluster_columns_update_effective_her2(qt_app):
         "ID",
         "X",
         "Y",
+        "Rx",
+        "Ry",
         "HER2",
         "S-cluster",
         "L-cluster",
@@ -129,20 +131,20 @@ def test_count_table_cluster_columns_update_effective_her2(qt_app):
         "Inc.",
         "Comment",
     ]
-    expected_widths = [45, 70, 70, 75, 85, 85, 90, 85, 75, 55, 160]
-    assert [window.table.columnWidth(i) for i in range(11)] == expected_widths
+    expected_widths = [45, 70, 70, 55, 55, 75, 85, 85, 90, 85, 75, 55, 160]
+    assert [window.table.columnWidth(i) for i in range(13)] == expected_widths
 
-    window.table.cellWidget(0, 3).setValue(2)
-    window.table.cellWidget(0, 4).setValue(1)
-    window.table.cellWidget(0, 5).setValue(1)
-    window.table.cellWidget(0, 6).setValue(3)
-    window.table.cellWidget(0, 8).setValue(5)
+    window.table.cellWidget(0, 5).setValue(2)
+    window.table.cellWidget(0, 6).setValue(1)
+    window.table.cellWidget(0, 7).setValue(1)
+    window.table.cellWidget(0, 8).setValue(3)
+    window.table.cellWidget(0, 10).setValue(5)
     qt_app.processEvents()
 
     nucleus = window.project.nuclei[0]
     assert nucleus.effective_her2 == 23
     assert nucleus.cep17_red == 5
-    assert window.table.item(0, 7).text() == "23"
+    assert window.table.item(0, 9).text() == "23"
     assert "Total HER2 (effective): 23" in window.summary_label.text()
 
 
@@ -163,14 +165,14 @@ def test_table_selection_highlights_nucleus_and_updates_selected_panel(qt_app):
         if item.data(0) == 1 and hasattr(item, "pen")
     ]
     assert selected_ellipses
-    assert selected_ellipses[0].pen().color().name().lower() == "#ffff00"
-    assert selected_ellipses[0].pen().width() == 5
+    assert selected_ellipses[0].pen().color().name().lower() == "#ffa500"
+    assert selected_ellipses[0].pen().width() == 4
 
-    window.table.cellWidget(0, 3).setValue(3)
-    window.table.cellWidget(0, 4).setValue(1)
-    window.table.cellWidget(0, 5).setValue(1)
-    window.table.cellWidget(0, 6).setValue(2)
+    window.table.cellWidget(0, 5).setValue(3)
+    window.table.cellWidget(0, 6).setValue(1)
+    window.table.cellWidget(0, 7).setValue(1)
     window.table.cellWidget(0, 8).setValue(2)
+    window.table.cellWidget(0, 10).setValue(2)
     qt_app.processEvents()
 
     panel_text = window.selected_nucleus_label.text()
@@ -207,7 +209,7 @@ def test_viewer_marker_click_selects_matching_table_row(qt_app, tmp_path):
 def test_excluded_nucleus_uses_gray_dashed_marker(qt_app):
     window = MainWindow()
     window.add_nucleus_at(10, 20)
-    window.table.cellWidget(0, 9).setChecked(False)
+    window.table.cellWidget(0, 11).setChecked(False)
     qt_app.processEvents()
     window.select_nucleus_by_id(None)
     qt_app.processEvents()
@@ -233,37 +235,37 @@ def test_keyboard_shortcuts_update_selected_table_row(qt_app):
     QTest.keyClick(window.table, Qt.Key.Key_B)
     qt_app.processEvents()
     assert window.project.nuclei[0].her2_black == 1
-    assert window.table.cellWidget(0, 3).value() == 1
-    assert window.table.item(0, 7).text() == "1"
+    assert window.table.cellWidget(0, 5).value() == 1
+    assert window.table.item(0, 9).text() == "1"
 
     QTest.keyClick(window.table, Qt.Key.Key_B, Qt.KeyboardModifier.ShiftModifier)
     qt_app.processEvents()
     assert window.project.nuclei[0].her2_black == 0
-    assert window.table.cellWidget(0, 3).value() == 0
+    assert window.table.cellWidget(0, 5).value() == 0
 
     QTest.keyClick(window.table, Qt.Key.Key_R)
     qt_app.processEvents()
     assert window.project.nuclei[0].cep17_red == 1
-    assert window.table.cellWidget(0, 8).value() == 1
+    assert window.table.cellWidget(0, 10).value() == 1
 
     QTest.keyClick(window.table, Qt.Key.Key_S)
     qt_app.processEvents()
     assert window.project.nuclei[0].small_cluster_count == 1
     assert window.project.nuclei[0].effective_her2 == 6
-    assert window.table.item(0, 7).text() == "6"
+    assert window.table.item(0, 9).text() == "6"
     assert "Total HER2 (effective): 6" in window.summary_label.text()
 
     QTest.keyClick(window.table, Qt.Key.Key_L)
     qt_app.processEvents()
     assert window.project.nuclei[0].large_cluster_count == 1
     assert window.project.nuclei[0].effective_her2 == 18
-    assert window.table.item(0, 7).text() == "18"
+    assert window.table.item(0, 9).text() == "18"
     assert "Total HER2 (effective): 18" in window.summary_label.text()
 
     QTest.keyClick(window.table, Qt.Key.Key_I)
     qt_app.processEvents()
     assert not window.project.nuclei[0].included
-    assert not window.table.cellWidget(0, 9).isChecked()
+    assert not window.table.cellWidget(0, 11).isChecked()
     assert "Included nuclei: 0" in window.summary_label.text()
 
     QTest.keyClick(window.table, Qt.Key.Key_Delete)
@@ -294,8 +296,31 @@ def test_keyboard_shortcuts_update_selected_viewer_marker(qt_app, tmp_path):
     QTest.keyClick(window.viewer.viewport(), Qt.Key.Key_B)
     qt_app.processEvents()
     assert window.project.nuclei[1].her2_black == 1
-    assert window.table.cellWidget(1, 3).value() == 1
-    assert window.table.item(1, 7).text() == "1"
+    assert window.table.cellWidget(1, 5).value() == 1
+    assert window.table.item(1, 9).text() == "1"
     labels = [item for item in window.viewer._overlay_items if item.data(0) == 2 and hasattr(item, "text")]
     assert labels
     assert labels[0].text() == "#2 H1/C0"
+
+
+def test_update_nucleus_roi_updates_table_panel_and_clears_candidates(qt_app):
+    window = MainWindow()
+    window.add_nucleus_at(40, 50)
+    nucleus = window.project.nuclei[0]
+    nucleus.black_dot_candidates.append(type("Candidate", (), {"x": 40, "y": 50, "area": 9, "color_type": "black"})())
+    nucleus.red_dot_candidates.append(type("Candidate", (), {"x": 42, "y": 50, "area": 9, "color_type": "red"})())
+
+    window.update_nucleus_roi(1, 70.5, 80.5, 12.0, 9.0)
+    qt_app.processEvents()
+
+    assert nucleus.x == pytest.approx(70.5)
+    assert nucleus.y == pytest.approx(80.5)
+    assert nucleus.radius_x == pytest.approx(12.0)
+    assert nucleus.radius_y == pytest.approx(9.0)
+    assert nucleus.black_dot_candidates == []
+    assert nucleus.red_dot_candidates == []
+    assert window.table.item(0, 1).text() == "70.5"
+    assert window.table.item(0, 2).text() == "80.5"
+    assert window.table.item(0, 3).text() == "12.0"
+    assert window.table.item(0, 4).text() == "9.0"
+    assert "ROI radii: Rx=12.0, Ry=9.0" in window.selected_nucleus_label.text()
