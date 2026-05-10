@@ -79,3 +79,42 @@ def test_annotated_png_expands_canvas_for_disclaimer_and_bottom_annotations(tmp_
     exported = pillow.open(png_path)
     assert exported.width >= 520
     assert exported.height > 90
+
+
+def test_nucleus_radius_roundtrip_and_legacy_defaults(tmp_path):
+    project = CaseProject(
+        nuclei=[NucleusCount(nucleus_id=1, x=33, y=44, radius_x=31.5, radius_y=12.5)]
+    )
+    path = tmp_path / "radius-project.json"
+    save_project(project, path)
+
+    loaded = load_project(path)
+    assert loaded.nuclei[0].radius_x == pytest.approx(31.5)
+    assert loaded.nuclei[0].radius_y == pytest.approx(12.5)
+
+    legacy_path = tmp_path / "legacy-project.json"
+    legacy_path.write_text(
+        '{"nuclei": [{"nucleus_id": 1, "x": 10, "y": 20}]}', encoding="utf-8"
+    )
+    legacy = load_project(legacy_path)
+    assert legacy.nuclei[0].radius_x == pytest.approx(25.0)
+    assert legacy.nuclei[0].radius_y == pytest.approx(18.0)
+
+
+def test_annotated_png_uses_per_nucleus_radius(tmp_path):
+    pillow = pytest.importorskip("PIL.Image")
+    image_path = tmp_path / "source.png"
+    pillow.new("RGB", (100, 80), "white").save(image_path)
+    project = CaseProject(
+        image_path=str(image_path),
+        nuclei=[NucleusCount(nucleus_id=1, x=40, y=40, radius_x=10, radius_y=8)],
+    )
+
+    png_path = tmp_path / "annotated-radius.png"
+    export_annotated_png(project, png_path)
+    exported = pillow.open(png_path).convert("RGB")
+
+    # The source image is pasted at (28, 28); custom-radius ellipse reaches x=40+10, y=40.
+    assert exported.getpixel((28 + 50, 28 + 40)) != (255, 255, 255)
+    # A fixed 25 px radius would draw near x=40+25, but the adjusted 10 px ROI should not.
+    assert exported.getpixel((28 + 65, 28 + 40)) == (255, 255, 255)
