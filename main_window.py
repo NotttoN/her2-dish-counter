@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QAbstractSpinBox,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -32,7 +33,13 @@ from PySide6.QtWidgets import (
 from PIL import Image
 
 from her2dish.core.constants import RESEARCH_USE_DISCLAIMER
-from her2dish.core.dot_detection import DEFAULT_DOT_DETECTION_PARAMS, detect_black_dots, detect_red_dots
+from her2dish.core.dot_detection import (
+    RED_SENSITIVITY_PRESETS,
+    ComponentDetectionStats,
+    detect_black_dots,
+    detect_red_dots_with_debug,
+    red_detection_params_for_preset,
+)
 from her2dish.core.exporters import export_annotated_png, export_csv
 from her2dish.core.models import CaseProject, NucleusCount, RoiRectangle
 from her2dish.core.project_io import load_project, save_project
@@ -89,16 +96,19 @@ TABLE_COLUMN_WIDTHS = {
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.2.1."""
+    """Main window for HER2-DISH Counter v0.2.2."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.2.1")
+        self.setWindowTitle("HER2-DISH Counter v0.2.2")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
         self._updating_table = False
         self.selected_nucleus_id: int | None = None
+        self.last_red_detection_stats: ComponentDetectionStats | None = None
+        self.last_red_detection_nucleus_id: int | None = None
+        self.last_red_detection_preset = "Standard"
 
         self._build_menu()
         self._build_ui()
@@ -121,7 +131,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.2.1")
+        title = QLabel("HER2-DISH Counter v0.2.2")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -178,6 +188,13 @@ class MainWindow(QMainWindow):
         right.addLayout(controls)
 
         dot_controls = QHBoxLayout()
+        dot_controls.addWidget(QLabel("Red sensitivity:"))
+        self.red_sensitivity_combo = QComboBox(self)
+        self.red_sensitivity_combo.addItems(RED_SENSITIVITY_PRESETS.keys())
+        self.red_sensitivity_combo.setCurrentText("Standard")
+        self.red_sensitivity_combo.currentTextChanged.connect(self._red_sensitivity_changed)
+        dot_controls.addWidget(self.red_sensitivity_combo)
+
         self.detect_dots_button = QPushButton("Detect dots")
         self.detect_dots_button.clicked.connect(self.detect_dots_for_selected_nucleus)
         dot_controls.addWidget(self.detect_dots_button)
@@ -266,6 +283,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Open image failed", str(exc))
             return
         self.project.image_path = path
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
         self.viewer.set_roi(self.project.roi)
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
 
@@ -284,6 +303,8 @@ class MainWindow(QMainWindow):
             except ValueError:
                 pass
         self.selected_nucleus_id = None
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
         self.refresh_table_from_project()
         self.viewer.set_roi(self.project.roi)
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
@@ -303,13 +324,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Detect dots", "Open an image before detecting dots.")
             return
         image = Image.open(image_path).convert("RGB")
-        params = DEFAULT_DOT_DETECTION_PARAMS
+        self.last_red_detection_preset = self.red_sensitivity_combo.currentText()
+        params = red_detection_params_for_preset(self.last_red_detection_preset)
         nucleus.black_dot_candidates = detect_black_dots(
             image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
         )
-        nucleus.red_dot_candidates = detect_red_dots(
+        red_result = detect_red_dots_with_debug(
             image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
         )
+        nucleus.red_dot_candidates = red_result.candidates
+        self.last_red_detection_stats = red_result.stats
+        self.last_red_detection_nucleus_id = nucleus.nucleus_id
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()
         self.statusBar().showMessage(
@@ -336,6 +361,8 @@ class MainWindow(QMainWindow):
             return
         nucleus.black_dot_candidates.clear()
         nucleus.red_dot_candidates.clear()
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()
         self.statusBar().showMessage(f"Cleared dot candidates for nucleus #{nucleus.nucleus_id}")
@@ -390,6 +417,8 @@ class MainWindow(QMainWindow):
         nucleus.radius_y = float(radius_y)
         nucleus.black_dot_candidates.clear()
         nucleus.red_dot_candidates.clear()
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
         self._refresh_after_selected_nucleus_edit(row)
         self.statusBar().showMessage(
             "ROI changed; dot candidates cleared. Please run Detect dots again."
@@ -474,6 +503,8 @@ class MainWindow(QMainWindow):
         for index, remaining_nucleus in enumerate(self.project.nuclei, start=1):
             remaining_nucleus.nucleus_id = index
         self.selected_nucleus_id = None
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
         self.refresh_table_from_project()
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()
@@ -528,6 +559,7 @@ class MainWindow(QMainWindow):
             self.dot_candidates_label.setText("Dot candidates: select a nucleus, then Detect dots")
             return
         status = "included" if nucleus.included else "excluded"
+        red_debug_lines = self._red_debug_lines(nucleus)
         self.selected_nucleus_label.setText(
             "\n".join(
                 [
@@ -542,6 +574,7 @@ class MainWindow(QMainWindow):
                     f"Effective HER2: {nucleus.effective_her2}",
                     f"Detected HER2 candidates: {len(nucleus.black_dot_candidates)}",
                     f"Detected CEP17 candidates: {len(nucleus.red_dot_candidates)}",
+                    *red_debug_lines,
                 ]
             )
         )
@@ -550,6 +583,25 @@ class MainWindow(QMainWindow):
             f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}. "
             "Use Apply detected counts to copy candidates into editable final count fields."
         )
+
+    def _red_debug_lines(self, nucleus: NucleusCount) -> list[str]:
+        if self.last_red_detection_stats is None or self.last_red_detection_nucleus_id != nucleus.nucleus_id:
+            return [f"Red sensitivity: {self.last_red_detection_preset}"]
+        stats = self.last_red_detection_stats
+        return [
+            f"Red sensitivity: {self.last_red_detection_preset}",
+            f"Red mask pixels: {stats.mask_pixels}",
+            f"Red connected components: {stats.connected_components}",
+            f"Red area-pass components: {stats.area_pass_components}",
+            f"Red circularity-pass components: {stats.circularity_pass_components}",
+            f"Red ROI-pass components: {stats.roi_pass_components}",
+        ]
+
+    def _red_sensitivity_changed(self, preset_name: str) -> None:
+        self.last_red_detection_preset = preset_name
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
+        self.update_selected_nucleus_panel()
 
     def _append_row(self, nucleus: NucleusCount) -> None:
         self._updating_table = True
@@ -605,6 +657,8 @@ class MainWindow(QMainWindow):
         for index, nucleus in enumerate(self.project.nuclei, start=1):
             nucleus.nucleus_id = index
         self.selected_nucleus_id = None
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
         self.refresh_table_from_project()
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()

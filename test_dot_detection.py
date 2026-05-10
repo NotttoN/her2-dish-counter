@@ -5,7 +5,12 @@ import pytest
 PIL_Image = pytest.importorskip("PIL.Image")
 PIL_ImageDraw = pytest.importorskip("PIL.ImageDraw")
 
-from her2dish.core.dot_detection import detect_black_dots, detect_red_dots
+from her2dish.core.dot_detection import (
+    detect_black_dots,
+    detect_red_dots,
+    detect_red_dots_with_debug,
+    red_detection_params_for_preset,
+)
 from her2dish.core.models import CaseProject, NucleusCount
 from her2dish.core.project_io import load_project, save_project
 
@@ -42,6 +47,65 @@ def test_detect_red_dots_counts_synthetic_candidates():
 
     assert len(candidates) == 2
     assert {c.color_type for c in candidates} == {"red"}
+
+
+def test_detect_red_dots_counts_pure_red_standard_candidates():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    for xy in [(52, 45), (70, 55)]:
+        _dot(draw, xy, 3, (255, 0, 0))
+
+    candidates = detect_red_dots(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert len(candidates) == 2
+    assert {c.color_type for c in candidates} == {"red"}
+
+
+def test_detect_red_dots_counts_magenta_standard_candidates():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    for xy in [(52, 45), (70, 55)]:
+        _dot(draw, xy, 3, (220, 45, 220))
+
+    candidates = detect_red_dots(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert len(candidates) == 2
+
+
+def test_sensitive_detects_pale_red_that_standard_rejects():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    for xy in [(52, 45), (70, 55)]:
+        _dot(draw, xy, 3, (230, 200, 205))
+
+    standard = detect_red_dots(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+    sensitive = detect_red_dots(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert standard == []
+    assert len(sensitive) == 2
+
+
+def test_red_detection_debug_reports_nonzero_mask_values():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    for xy in [(52, 45), (70, 55)]:
+        _dot(draw, xy, 3, (220, 45, 220))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert result.stats.mask_pixels > 0
+    assert result.stats.connected_components == 2
+    assert result.stats.detected_candidates == 2
 
 
 def test_detection_excludes_dots_outside_nucleus_roi():
