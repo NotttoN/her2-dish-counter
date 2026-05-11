@@ -610,11 +610,13 @@ class MainWindow(QMainWindow):
             f"Red sensitivity: {self.last_red_detection_preset}",
             f"Red mask pixels: {stats.mask_pixels}",
             f"Red connected components: {stats.connected_components}",
-            f"Red candidates after area filter: {stats.area_pass_components}",
-            f"Red candidates after circularity filter: {stats.circularity_pass_components}",
-            f"Large red candidates: {stats.large_red_candidates}",
+            f"Red components after area filter: {stats.area_pass_components}",
+            f"Red components after circularity filter: {stats.circularity_pass_components}",
+            f"Final CEP17 candidates: {stats.final_cep17_candidates}",
             f"Overlap review candidates: {stats.overlap_review_candidates}",
-            "Note: Overlap review candidates are not automatically applied.",
+            f"Large red candidates: {stats.large_red_candidates}",
+            f"Merged duplicate red candidates: {stats.merged_duplicate_red_candidates}",
+            "Note: Final CEP17 candidates are applied; overlap review candidates are display-only.",
         ]
 
     def _large_red_candidate_count(self, nucleus: NucleusCount) -> int:

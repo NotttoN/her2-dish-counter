@@ -6,6 +6,8 @@ PIL_Image = pytest.importorskip("PIL.Image")
 PIL_ImageDraw = pytest.importorskip("PIL.ImageDraw")
 
 from her2dish.core.dot_detection import (
+    DotCandidate,
+    _merge_duplicate_red_candidates,
     detect_black_dots,
     detect_red_dots,
     detect_red_dots_with_debug,
@@ -288,3 +290,101 @@ def test_black_split_red_component_is_not_overcounted_as_multiple_cep17():
     )
 
     assert len(result.candidates) <= 1
+
+
+def test_red_connected_components_are_final_cep17_candidates():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (52, 45), 4, (220, 20, 70))
+    _dot(draw, (72, 55), 4, (220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert result.stats.connected_components == 2
+    assert result.stats.area_pass_components == 2
+    assert result.stats.circularity_pass_components == 2
+    assert len(result.candidates) == 2
+    assert result.stats.final_cep17_candidates == 2
+
+
+def test_large_red_component_is_one_final_cep17_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    draw.ellipse((43, 35, 78, 66), fill=(220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert result.stats.connected_components == 1
+    assert len(result.candidates) == 1
+    assert result.candidates[0].color_type == "large_red"
+    assert result.stats.final_cep17_candidates == 1
+
+
+def test_irregular_red_component_is_one_final_cep17_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    draw.polygon([(45, 46), (58, 38), (78, 48), (67, 61), (50, 58)], fill=(220, 20, 70))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Sensitive")
+    )
+
+    assert result.stats.connected_components == 1
+    assert len(result.candidates) == 1
+    assert result.stats.final_cep17_candidates == 1
+
+
+def test_duplicate_red_candidates_from_same_component_are_merged():
+    candidates, merged_count = _merge_duplicate_red_candidates(
+        [
+            (1, DotCandidate(x=50.0, y=50.0, area=20.0, confidence=0.7, color_type="red")),
+            (1, DotCandidate(x=53.0, y=50.0, area=25.0, confidence=0.8, color_type="large_red")),
+        ],
+        merge_distance_px=6.0,
+    )
+
+    assert len(candidates) == 1
+    assert merged_count == 1
+    assert candidates[0].color_type == "large_red"
+
+
+def test_near_duplicate_red_candidates_are_merged_by_distance():
+    candidates, merged_count = _merge_duplicate_red_candidates(
+        [
+            (1, DotCandidate(x=50.0, y=50.0, area=20.0, confidence=0.7, color_type="red")),
+            (2, DotCandidate(x=55.0, y=51.0, area=22.0, confidence=0.6, color_type="red")),
+        ],
+        merge_distance_px=6.0,
+    )
+
+    assert len(candidates) == 1
+    assert merged_count == 1
+
+
+def test_black_dot_and_nearby_red_dot_are_separate_candidates():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (55, 50), 3, (15, 15, 15))
+    _dot(draw, (65, 50), 3, (220, 20, 70))
+
+    black = detect_black_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
+    red = detect_red_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
+
+    assert len(black) == 1
+    assert len(red) == 1
+
+
+def test_very_dark_reddish_black_dot_is_kept_as_her2_not_cep17():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 3, (95, 25, 20))
+
+    black = detect_black_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
+    red = detect_red_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
+
+    assert len(black) == 1
+    assert red == []
