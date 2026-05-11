@@ -51,6 +51,7 @@ class DotDetectionParams:
     red_circularity_threshold: float = 0.15
     red_large_min_area: float = 180.0
     red_peak_min_distance: float = 5.0
+    red_duplicate_merge_distance_px: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,8 @@ class ComponentDetectionStats:
     detected_candidates: int = 0
     large_red_candidates: int = 0
     overlap_review_candidates: int = 0
+    merged_duplicate_red_candidates: int = 0
+    final_cep17_candidates: int = 0
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ RED_SENSITIVITY_PRESETS: dict[str, DotDetectionParams] = {
         red_circularity_threshold=0.22,
         red_large_min_area=150.0,
         red_peak_min_distance=6.0,
+        red_duplicate_merge_distance_px=8.0,
     ),
     "Standard": DotDetectionParams(
         red_min_area=2.0,
@@ -97,6 +101,7 @@ RED_SENSITIVITY_PRESETS: dict[str, DotDetectionParams] = {
         red_circularity_threshold=0.08,
         red_large_min_area=180.0,
         red_peak_min_distance=5.0,
+        red_duplicate_merge_distance_px=6.0,
     ),
     "Sensitive": DotDetectionParams(
         red_min_area=2.0,
@@ -107,6 +112,7 @@ RED_SENSITIVITY_PRESETS: dict[str, DotDetectionParams] = {
         red_circularity_threshold=0.02,
         red_large_min_area=100.0,
         red_peak_min_distance=4.0,
+        red_duplicate_merge_distance_px=5.0,
     ),
 }
 
@@ -308,7 +314,7 @@ def _detect_red_components(
         lambda r, g, b: _is_red_candidate_pixel(r, g, b, params),
     )
 
-    candidates: list[DotCandidate] = []
+    candidates_by_component: list[tuple[int, DotCandidate]] = []
     overlap_candidates: list[DotCandidate] = []
     visited: set[tuple[int, int]] = set()
     connected_components = 0
@@ -322,8 +328,9 @@ def _detect_red_components(
             continue
         component = _flood_component(seed, mask, visited)
         connected_components += 1
+        component_id = connected_components
         area = float(len(component))
-        if area < params.red_min_area or area > params.red_max_area:
+        if area < params.red_min_area:
             continue
         area_pass_components += 1
 
@@ -341,7 +348,7 @@ def _detect_red_components(
         metrics = _component_color_metrics(component, pixels, width, height)
         base_confidence = _red_confidence(component_pixels, params)
         confidence = max(0.0, min(1.0, base_confidence * (0.70 + 0.30 * min(1.0, circularity))))
-        is_large = area >= params.red_large_min_area or not circularity_passed
+        is_large = area >= params.red_large_min_area or area > params.red_max_area or not circularity_passed
         overlaps_black = _component_strongly_overlaps_black(component, cx, cy, black_components)
         black_dominant = metrics["black_score"] >= metrics["red_score"] * 1.15 and metrics["dark_ratio"] >= 0.25
         mixed_overlap = overlaps_black and metrics["red_ratio"] >= 0.12 and metrics["dark_ratio"] >= 0.08
@@ -361,16 +368,22 @@ def _detect_red_components(
         color_type = "large_red" if is_large else "red"
         if color_type == "large_red":
             large_red_candidates += 1
-        candidates.append(
-            DotCandidate(
-                x=float(cx),
-                y=float(cy),
-                area=area,
-                confidence=confidence,
-                color_type=color_type,
+        candidates_by_component.append(
+            (
+                component_id,
+                DotCandidate(
+                    x=float(cx),
+                    y=float(cy),
+                    area=area,
+                    confidence=confidence,
+                    color_type=color_type,
+                ),
             )
         )
 
+    candidates, merged_duplicate_red_candidates = _merge_duplicate_red_candidates(
+        candidates_by_component, params.red_duplicate_merge_distance_px
+    )
     candidates.sort(key=lambda c: (c.y, c.x))
     overlap_candidates.sort(key=lambda c: (c.y, c.x))
     stats = ComponentDetectionStats(
@@ -380,10 +393,66 @@ def _detect_red_components(
         circularity_pass_components=circularity_pass_components,
         roi_pass_components=roi_pass_components,
         detected_candidates=len(candidates),
-        large_red_candidates=large_red_candidates,
+        large_red_candidates=sum(1 for candidate in candidates if candidate.color_type == "large_red"),
         overlap_review_candidates=len(overlap_candidates),
+        merged_duplicate_red_candidates=merged_duplicate_red_candidates,
+        final_cep17_candidates=len(candidates),
     )
     return candidates, overlap_candidates, stats
+
+
+def _merge_duplicate_red_candidates(
+    candidates_by_component: list[tuple[int, DotCandidate]], merge_distance_px: float
+) -> tuple[list[DotCandidate], int]:
+    """Merge duplicate CEP17 candidates produced from the same red component.
+
+    The red detector is intended to emit at most one final CEP17 candidate for
+    each red connected component.  This safeguard also collapses any future
+    near-duplicate candidates whose centers are closer than the configured
+    merge distance, preferring ordinary/large red candidates over debug-only
+    overlap candidates (which are not passed into this final-count path).
+    """
+
+    if not candidates_by_component:
+        return [], 0
+
+    merged: list[tuple[set[int], DotCandidate]] = []
+    for component_id, candidate in candidates_by_component:
+        match_index: int | None = None
+        merge_distance_sq = merge_distance_px * merge_distance_px
+        for index, (component_ids, existing) in enumerate(merged):
+            same_component = component_id in component_ids
+            centers_close = (
+                (candidate.x - existing.x) ** 2 + (candidate.y - existing.y) ** 2 <= merge_distance_sq
+            )
+            if same_component or centers_close:
+                match_index = index
+                break
+        if match_index is None:
+            merged.append(({component_id}, candidate))
+            continue
+
+        component_ids, existing = merged[match_index]
+        component_ids.add(component_id)
+        merged[match_index] = (component_ids, _combine_red_candidates(existing, candidate))
+
+    return [candidate for _, candidate in merged], len(candidates_by_component) - len(merged)
+
+
+def _combine_red_candidates(first: DotCandidate, second: DotCandidate) -> DotCandidate:
+    total_area = max(1.0, float(first.area) + float(second.area))
+    x = (first.x * float(first.area) + second.x * float(second.area)) / total_area
+    y = (first.y * float(first.area) + second.y * float(second.area)) / total_area
+    confidence_values = [value for value in (first.confidence, second.confidence) if value is not None]
+    confidence = max(confidence_values) if confidence_values else None
+    color_type = "large_red" if "large_red" in {first.color_type, second.color_type} else "red"
+    return DotCandidate(
+        x=float(x),
+        y=float(y),
+        area=total_area,
+        confidence=confidence,
+        color_type=color_type,
+    )
 
 
 def _components_from_mask(mask: set[tuple[int, int]]) -> list[list[tuple[int, int]]]:
@@ -577,10 +646,14 @@ def _inside_ellipse(px: float, py: float, cx: float, cy: float, rx: float, ry: f
 def _is_black_candidate_pixel(r: int, g: int, b: int, params: DotDetectionParams) -> bool:
     luminance = 0.299 * r + 0.587 * g + 0.114 * b
     red_chroma = r - max(g, b)
-    return luminance <= params.black_threshold and max(r, g, b) <= 155 and red_chroma < 45
+    dark_enough = luminance <= params.black_threshold and max(r, g, b) <= 155
+    very_dark = luminance <= params.black_threshold * 0.80 and max(r, g, b) <= 130
+    return dark_enough and (red_chroma < 45 or very_dark)
 
 
 def _is_red_candidate_pixel(r: int, g: int, b: int, params: DotDetectionParams) -> bool:
+    if _is_black_candidate_pixel(r, g, b, params):
+        return False
     hue, saturation, value = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
     hue_opencv = hue * 179.0
     if not any(start <= hue_opencv <= end for start, end in params.red_hue_range):
