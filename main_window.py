@@ -379,7 +379,9 @@ class MainWindow(QMainWindow):
             image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
         )
         nucleus.red_dot_candidates = red_result.candidates
-        nucleus.overlap_dot_candidates = red_result.overlap_candidates
+        # Backward-compatible storage exists for older JSON files, but new detection
+        # no longer creates display-only overlap review candidates.
+        nucleus.overlap_dot_candidates = []
         self.last_red_detection_stats = red_result.stats
         self.last_red_detection_nucleus_id = nucleus.nucleus_id
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
@@ -387,8 +389,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Detected candidates for nucleus #{nucleus.nucleus_id}: "
             f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
-            f"cluster review={len(nucleus.black_cluster_candidates)}, "
-            f"overlap review={len(nucleus.overlap_dot_candidates)}"
+            f"cluster review={len(nucleus.black_cluster_candidates)}"
         )
 
     def apply_detected_counts_to_selected_nucleus(self) -> None:
@@ -399,13 +400,10 @@ class MainWindow(QMainWindow):
         nucleus.her2_black = len(nucleus.black_dot_candidates)
         nucleus.cep17_red = len(nucleus.red_dot_candidates)
         large_red_count = self._large_red_candidate_count(nucleus)
-        overlap_count = len(nucleus.overlap_dot_candidates)
         self._refresh_after_selected_nucleus_edit(row)
         review_notes = []
         if large_red_count:
             review_notes.append("large red candidate included as 1; please review manually")
-        if overlap_count:
-            review_notes.append("overlap review candidates not applied")
         if nucleus.black_cluster_candidates:
             review_notes.append("black cluster review candidates not applied")
         review_note = f"; {'; '.join(review_notes)}" if review_notes else ""
@@ -640,8 +638,8 @@ class MainWindow(QMainWindow):
                     f"Detected HER2 candidates: {len(nucleus.black_dot_candidates)}",
                     f"Detected CEP17 candidates: {len(nucleus.red_dot_candidates)}",
                     f"Black cluster review candidates: {len(nucleus.black_cluster_candidates)}",
-                    f"Overlap review candidates: {len(nucleus.overlap_dot_candidates)}",
                     f"Large red candidates: {self._large_red_candidate_count(nucleus)}",
+                    f"Red haze rejected components: {self._red_haze_rejected_count(nucleus)}",
                     *red_debug_lines,
                 ]
             )
@@ -649,11 +647,10 @@ class MainWindow(QMainWindow):
         self.dot_candidates_label.setText(
             f"Dot candidates for selected nucleus: "
             f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
-            f"cluster review={len(nucleus.black_cluster_candidates)}, "
-            f"overlap review={len(nucleus.overlap_dot_candidates)} "
+            f"cluster review={len(nucleus.black_cluster_candidates)} "
             f"(large red={self._large_red_candidate_count(nucleus)}). "
-            "Cluster and overlap candidates are not automatically applied. "
-            "Please adjust HER2/CEP17/cluster fields manually if needed."
+            "Red signals inside or near black clusters are included as CEP17 candidates when red/magenta signal is detected. "
+            "Black cluster candidates are not automatically applied; please review and enter S/L-cluster manually if appropriate."
         )
 
     def _red_debug_lines(self, nucleus: NucleusCount) -> list[str]:
@@ -679,15 +676,19 @@ class MainWindow(QMainWindow):
             f"Red components after area filter: {stats.area_pass_components}",
             f"Red components after circularity filter: {stats.circularity_pass_components}",
             f"Final CEP17 candidates: {stats.final_cep17_candidates}",
-            f"Overlap review candidates: {stats.overlap_review_candidates}",
             f"Large red candidates: {stats.large_red_candidates}",
             f"Red haze rejected components: {stats.red_haze_rejected_components}",
             f"Merged duplicate red candidates: {stats.merged_duplicate_red_candidates}",
-            "Note: Final CEP17 candidates are applied; cluster/overlap review candidates are display-only.",
+            "Note: Final CEP17 candidates are applied; black cluster review candidates are display-only.",
         ]
 
     def _large_red_candidate_count(self, nucleus: NucleusCount) -> int:
         return sum(1 for candidate in nucleus.red_dot_candidates if candidate.color_type == "large_red")
+
+    def _red_haze_rejected_count(self, nucleus: NucleusCount) -> int:
+        if self.last_red_detection_stats is None or self.last_red_detection_nucleus_id != nucleus.nucleus_id:
+            return 0
+        return self.last_red_detection_stats.red_haze_rejected_components
 
     def _current_detection_params(self) -> DotDetectionParams:
         self.project.detection_settings = DetectionSettings(

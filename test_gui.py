@@ -349,16 +349,18 @@ def test_detect_dots_requires_apply_before_cep17_changes(qt_app):
     assert nucleus.cep17_red == 2
 
 
-def test_apply_detected_counts_excludes_overlap_review_candidates(qt_app):
+def test_apply_detected_counts_excludes_black_cluster_review_candidates(qt_app):
     window = MainWindow()
     window.add_nucleus_at(40, 50)
     nucleus = window.project.nuclei[0]
     nucleus.her2_black = 5
     nucleus.cep17_red = 4
+    nucleus.small_cluster_count = 2
+    nucleus.large_cluster_count = 1
     nucleus.black_dot_candidates.append(type("Candidate", (), {"x": 40, "y": 50, "area": 20, "color_type": "black"})())
     nucleus.red_dot_candidates.append(type("Candidate", (), {"x": 45, "y": 50, "area": 30, "color_type": "red"})())
-    nucleus.overlap_dot_candidates.append(
-        type("Candidate", (), {"x": 42, "y": 50, "area": 50, "color_type": "overlap_review"})()
+    nucleus.black_cluster_candidates.append(
+        type("Candidate", (), {"x": 42, "y": 50, "area": 120, "color_type": "black_cluster_review"})()
     )
     window._refresh_after_selected_nucleus_edit(0)
     qt_app.processEvents()
@@ -371,4 +373,6 @@ def test_apply_detected_counts_excludes_overlap_review_candidates(qt_app):
 
     assert nucleus.her2_black == 1
     assert nucleus.cep17_red == 1
-    assert "overlap review candidates not applied" in window.statusBar().currentMessage()
+    assert nucleus.small_cluster_count == 2
+    assert nucleus.large_cluster_count == 1
+    assert "black cluster review candidates not applied" in window.statusBar().currentMessage()

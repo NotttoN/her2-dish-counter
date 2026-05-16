@@ -62,6 +62,8 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     assert rows[0]["effective_her2"] == "10"
     assert rows[0]["detected_black_dot_count"] == "0"
     assert rows[0]["detected_red_dot_count"] == "0"
+    assert rows[0]["detected_large_red_count"] == "0"
+    assert "overlap_review_candidate_count" not in rows[0]
     assert rows[0]["black_cluster_review_candidate_count"] == "0"
     assert rows[0]["detection_red_sensitivity"] == "61"
     assert rows[0]["detection_black_sensitivity"] == "62"
@@ -132,3 +134,31 @@ def test_annotated_png_uses_per_nucleus_radius(tmp_path):
     assert exported.getpixel((28 + 50, 28 + 40)) != (255, 255, 255)
     # A fixed 25 px radius would draw near x=40+25, but the adjusted 10 px ROI should not.
     assert exported.getpixel((28 + 65, 28 + 40)) == (255, 255, 255)
+
+
+def test_save_project_omits_legacy_overlap_candidates(tmp_path):
+    from her2dish.core.dot_detection import DotCandidate
+
+    nucleus = NucleusCount(nucleus_id=1, x=10, y=20)
+    nucleus.overlap_dot_candidates.append(DotCandidate(x=10, y=20, area=25, color_type="overlap_review"))
+    project = CaseProject(nuclei=[nucleus])
+
+    path = tmp_path / "project.json"
+    save_project(project, path)
+
+    saved = path.read_text(encoding="utf-8")
+    assert "overlap_dot_candidates" not in saved
+    assert "overlap_review" not in saved
+
+
+def test_load_project_accepts_legacy_overlap_candidates(tmp_path):
+    path = tmp_path / "legacy-overlap.json"
+    path.write_text(
+        '{"nuclei": [{"nucleus_id": 1, "x": 10, "y": 20, "overlap_dot_candidates": [{"x": 10, "y": 20, "area": 25}]}]}',
+        encoding="utf-8",
+    )
+
+    loaded = load_project(path)
+
+    assert len(loaded.nuclei) == 1
+    assert len(loaded.nuclei[0].overlap_dot_candidates) == 1

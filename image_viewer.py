@@ -166,15 +166,13 @@ class ImageViewer(QGraphicsView):
             *((candidate, "deepskyblue") for candidate in nucleus.black_dot_candidates),
             *((candidate, "cyan") for candidate in nucleus.black_cluster_candidates),
             *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
-            *((candidate, "purple") for candidate in nucleus.overlap_dot_candidates),
         ]:
             is_large_red = candidate.color_type == "large_red"
-            is_overlap = candidate.color_type == "overlap_review"
             is_cluster = candidate.color_type == "black_cluster_review"
-            radius = max(3.0, min(13.0 if is_cluster else 11.0 if is_overlap else 10.0 if is_large_red else 8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
+            radius = max(3.0, min(13.0 if is_cluster else 10.0 if is_large_red else 8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
             dot = QGraphicsEllipseItem(candidate.x - radius, candidate.y - radius, radius * 2.0, radius * 2.0)
-            pen = QPen(QColor("orange" if is_large_red else color_name), 3 if (is_large_red or is_overlap or is_cluster) else 2)
-            if is_large_red or is_overlap or is_cluster:
+            pen = QPen(QColor("orange" if is_large_red else color_name), 3 if (is_large_red or is_cluster) else 2)
+            if is_large_red or is_cluster:
                 pen.setStyle(Qt.PenStyle.DashLine)
             dot.setPen(pen)
             dot.setBrush(Qt.BrushStyle.NoBrush)
@@ -183,21 +181,7 @@ class ImageViewer(QGraphicsView):
             dot.setZValue(20)
             self._scene.addItem(dot)
             self._overlay_items.append(dot)
-            if is_overlap:
-                inner_radius = max(2.0, radius - 3.0)
-                inner_dot = QGraphicsEllipseItem(
-                    candidate.x - inner_radius,
-                    candidate.y - inner_radius,
-                    inner_radius * 2.0,
-                    inner_radius * 2.0,
-                )
-                inner_dot.setPen(QPen(QColor("orange"), 2))
-                inner_dot.setBrush(Qt.BrushStyle.NoBrush)
-                inner_dot.setData(1, candidate.color_type)
-                inner_dot.setToolTip(f"{candidate.color_type} dot candidate: area={candidate.area:.1f}")
-                inner_dot.setZValue(21)
-                self._scene.addItem(inner_dot)
-                self._overlay_items.append(inner_dot)
+
 
     def wheelEvent(self, event) -> None:  # noqa: N802 - Qt override
         if not self.has_image():
