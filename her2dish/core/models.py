@@ -8,6 +8,38 @@ from .dot_detection import DotCandidate
 
 
 @dataclass
+class DetectionSettings:
+    preset: str = "Standard"
+    red_sensitivity: int = 50
+    black_sensitivity: int = 50
+    haze_rejection: int = 50
+    cluster_sensitivity: int = 50
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "DetectionSettings":
+        if not data:
+            return cls()
+        return cls(
+            preset=str(data.get("preset", "Standard")),
+            red_sensitivity=_clamp_setting(data.get("red_sensitivity", 50)),
+            black_sensitivity=_clamp_setting(data.get("black_sensitivity", 50)),
+            haze_rejection=_clamp_setting(data.get("haze_rejection", 50)),
+            cluster_sensitivity=_clamp_setting(data.get("cluster_sensitivity", 50)),
+        )
+
+
+def _clamp_setting(value: Any) -> int:
+    try:
+        numeric = int(round(float(value)))
+    except (TypeError, ValueError):
+        numeric = 50
+    return max(0, min(100, numeric))
+
+
+@dataclass
 class RoiRectangle:
     """Axis-aligned rectangular ROI stored in image coordinates."""
 
@@ -78,6 +110,7 @@ class NucleusCount:
     black_dot_candidates: list[DotCandidate] = field(default_factory=list)
     red_dot_candidates: list[DotCandidate] = field(default_factory=list)
     overlap_dot_candidates: list[DotCandidate] = field(default_factory=list)
+    black_cluster_candidates: list[DotCandidate] = field(default_factory=list)
 
     @property
     def effective_her2(self) -> int:
@@ -116,6 +149,10 @@ class NucleusCount:
             DotCandidate.from_dict(item, "overlap_review")
             for item in (payload.get("overlap_dot_candidates") or [])
         ]
+        payload["black_cluster_candidates"] = [
+            DotCandidate.from_dict(item, "black_cluster_review")
+            for item in (payload.get("black_cluster_candidates") or [])
+        ]
         return cls(**payload)
 
 
@@ -129,6 +166,7 @@ class CaseProject:
     nuclei: list[NucleusCount] = field(default_factory=list)
     roi: RoiRectangle | None = None
     notes: str = ""
+    detection_settings: DetectionSettings = field(default_factory=DetectionSettings)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +178,7 @@ class CaseProject:
             "nuclei": [n.to_dict() for n in self.nuclei],
             "roi": self.roi.to_dict() if self.roi else None,
             "notes": self.notes,
+            "detection_settings": self.detection_settings.to_dict(),
         }
 
     @classmethod
@@ -159,4 +198,5 @@ class CaseProject:
             nuclei=[NucleusCount.from_dict(item) for item in data.get("nuclei", [])],
             roi=RoiRectangle.from_dict(roi_data) if roi_data else None,
             notes=str(data.get("notes", "")),
+            detection_settings=DetectionSettings.from_dict(data.get("detection_settings")),
         )

@@ -39,9 +39,16 @@ class DotDetectionParams:
     channel semantics if OpenCV is used by a future implementation.
     """
 
+    red_sensitivity: int = 50
+    black_sensitivity: int = 50
+    haze_rejection: int = 50
+    cluster_sensitivity: int = 50
     black_min_area: float = 8.0
     black_max_area: float = 220.0
     black_threshold: int = 115
+    black_darkness_threshold: float = 115.0
+    black_local_contrast_threshold: float = 0.16
+    black_circularity_threshold: float = 0.45
     red_min_area: float = 2.0
     red_max_area: float = 200.0
     red_hue_range: tuple[tuple[float, float], ...] = ((0.0, 15.0), (130.0, 179.0))
@@ -52,6 +59,14 @@ class DotDetectionParams:
     red_large_min_area: float = 180.0
     red_peak_min_distance: float = 5.0
     red_duplicate_merge_distance_px: float = 6.0
+    red_haze_saturation_threshold: float = 0.18
+    red_haze_local_contrast_threshold: float = 0.16
+    red_haze_area_threshold: float = 260.0
+    red_haze_rejection_strength: float = 0.50
+    black_cluster_min_area: float = 85.0
+    black_cluster_max_area: float = 900.0
+    black_cluster_darkness_threshold: float = 120.0
+    black_cluster_compactness_threshold: float = 0.16
 
 
 @dataclass(frozen=True)
@@ -66,6 +81,7 @@ class ComponentDetectionStats:
     detected_candidates: int = 0
     large_red_candidates: int = 0
     overlap_review_candidates: int = 0
+    red_haze_rejected_components: int = 0
     merged_duplicate_red_candidates: int = 0
     final_cep17_candidates: int = 0
 
@@ -119,6 +135,65 @@ RED_SENSITIVITY_PRESETS: dict[str, DotDetectionParams] = {
 DEFAULT_DOT_DETECTION_PARAMS = RED_SENSITIVITY_PRESETS["Standard"]
 
 
+def _clamp_slider(value: int | float) -> int:
+    return max(0, min(100, int(round(float(value)))))
+
+
+def _lerp(low: float, high: float, t: float) -> float:
+    return low + (high - low) * t
+
+
+def params_from_sliders(
+    red_sensitivity: int,
+    black_sensitivity: int,
+    haze_rejection: int,
+    cluster_sensitivity: int,
+) -> DotDetectionParams:
+    """Convert 0-100 UI sliders to internal semi-automatic detection parameters."""
+
+    red = _clamp_slider(red_sensitivity)
+    black = _clamp_slider(black_sensitivity)
+    haze = _clamp_slider(haze_rejection)
+    cluster = _clamp_slider(cluster_sensitivity)
+    rt = red / 100.0
+    bt = black / 100.0
+    ht = haze / 100.0
+    ct = cluster / 100.0
+    hue_edge = _lerp(12.0, 22.0, rt)
+    magenta_start = _lerp(142.0, 122.0, rt)
+    black_darkness = _lerp(88.0, 145.0, bt)
+    return DotDetectionParams(
+        red_sensitivity=red,
+        black_sensitivity=black,
+        haze_rejection=haze,
+        cluster_sensitivity=cluster,
+        red_saturation_threshold=_lerp(0.38, 0.10, rt),
+        red_value_threshold=_lerp(0.28, 0.10, rt),
+        red_min_area=_lerp(5.0, 1.0, rt),
+        red_max_area=_lerp(180.0, 760.0, rt),
+        red_hue_range=((0.0, hue_edge), (magenta_start, 179.0)),
+        red_circularity_threshold=_lerp(0.25, 0.01, rt),
+        red_large_min_area=_lerp(150.0, 100.0, rt),
+        red_peak_min_distance=_lerp(6.0, 4.0, rt),
+        red_duplicate_merge_distance_px=_lerp(8.0, 5.0, rt),
+        black_darkness_threshold=black_darkness,
+        black_threshold=int(round(black_darkness)),
+        black_min_area=_lerp(12.0, 2.0, bt),
+        black_max_area=_lerp(120.0, 280.0, bt),
+        black_local_contrast_threshold=_lerp(0.24, 0.06, bt),
+        black_circularity_threshold=_lerp(0.55, 0.22, bt),
+        circularity_threshold=_lerp(0.55, 0.22, bt),
+        red_haze_saturation_threshold=_lerp(0.10, 0.26, ht),
+        red_haze_local_contrast_threshold=_lerp(0.05, 0.24, ht),
+        red_haze_area_threshold=_lerp(520.0, 80.0, ht),
+        red_haze_rejection_strength=ht,
+        black_cluster_min_area=_lerp(170.0, 45.0, ct),
+        black_cluster_max_area=_lerp(500.0, 1400.0, ct),
+        black_cluster_darkness_threshold=_lerp(92.0, 150.0, ct),
+        black_cluster_compactness_threshold=_lerp(0.36, 0.08, ct),
+    )
+
+
 def red_detection_params_for_preset(preset_name: str) -> DotDetectionParams:
     """Return red detection params for a UI preset name, defaulting to Standard."""
 
@@ -145,9 +220,43 @@ def detect_black_dots(
         pixel_predicate=lambda r, g, b: _is_black_candidate_pixel(r, g, b, p),
         min_area=p.black_min_area,
         max_area=p.black_max_area,
-        circularity_threshold=p.circularity_threshold,
+        circularity_threshold=p.black_circularity_threshold,
         color_type="black",
         confidence_func=lambda pixels: _black_confidence(pixels, p),
+    )
+    return candidates
+
+
+def detect_black_cluster_candidates(
+    image_rgb: Any,
+    nucleus_x: float,
+    nucleus_y: float,
+    radius_x: float,
+    radius_y: float,
+    params: DotDetectionParams | None = None,
+) -> list[DotCandidate]:
+    """Detect large dark HER2 cluster review candidates without applying them to counts."""
+
+    p = params or DEFAULT_DOT_DETECTION_PARAMS
+    cluster_params = DotDetectionParams(
+        **{
+            **asdict(p),
+            "black_threshold": int(round(p.black_cluster_darkness_threshold)),
+            "black_darkness_threshold": p.black_cluster_darkness_threshold,
+        }
+    )
+    candidates, _ = _detect_components(
+        image_rgb,
+        nucleus_x,
+        nucleus_y,
+        radius_x,
+        radius_y,
+        pixel_predicate=lambda r, g, b: _is_black_candidate_pixel(r, g, b, cluster_params),
+        min_area=p.black_cluster_min_area,
+        max_area=p.black_cluster_max_area,
+        circularity_threshold=p.black_cluster_compactness_threshold,
+        color_type="black_cluster_review",
+        confidence_func=lambda pixels: _black_confidence(pixels, cluster_params),
     )
     return candidates
 
@@ -322,6 +431,7 @@ def _detect_red_components(
     circularity_pass_components = 0
     roi_pass_components = 0
     large_red_candidates = 0
+    red_haze_rejected_components = 0
 
     for seed in list(mask):
         if seed in visited:
@@ -346,6 +456,17 @@ def _detect_red_components(
 
         component_pixels = [pixels[y][x] for x, y in component]
         metrics = _component_color_metrics(component, pixels, width, height)
+        local_contrast = _component_local_contrast(component, pixels, width, height)
+        mean_saturation = _mean_saturation(component_pixels)
+        haze_like = (
+            area >= params.red_haze_area_threshold
+            and mean_saturation <= params.red_haze_saturation_threshold
+            and local_contrast <= params.red_haze_local_contrast_threshold
+        )
+        extreme_haze = area >= params.red_haze_area_threshold * 2.5 and local_contrast <= 0.08
+        if haze_like or extreme_haze:
+            red_haze_rejected_components += 1
+            continue
         base_confidence = _red_confidence(component_pixels, params)
         confidence = max(0.0, min(1.0, base_confidence * (0.70 + 0.30 * min(1.0, circularity))))
         is_large = area >= params.red_large_min_area or area > params.red_max_area or not circularity_passed
@@ -395,6 +516,7 @@ def _detect_red_components(
         detected_candidates=len(candidates),
         large_red_candidates=sum(1 for candidate in candidates if candidate.color_type == "large_red"),
         overlap_review_candidates=len(overlap_candidates),
+        red_haze_rejected_components=red_haze_rejected_components,
         merged_duplicate_red_candidates=merged_duplicate_red_candidates,
         final_cep17_candidates=len(candidates),
     )
@@ -490,6 +612,41 @@ def _component_strongly_overlaps_black(
         if center_near_black or red_border_touches_black:
             return True
     return False
+
+
+def _component_local_contrast(
+    component: Iterable[tuple[int, int]],
+    pixels: list[list[tuple[int, int, int]]],
+    width: int,
+    height: int,
+) -> float:
+    points = set(component)
+    if not points:
+        return 0.0
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    x_min, x_max = max(0, min(xs) - 2), min(width - 1, max(xs) + 2)
+    y_min, y_max = max(0, min(ys) - 2), min(height - 1, max(ys) + 2)
+    inside = [_luminance(*pixels[y][x]) for x, y in points]
+    ring = [
+        _luminance(*pixels[y][x])
+        for y in range(y_min, y_max + 1)
+        for x in range(x_min, x_max + 1)
+        if (x, y) not in points
+    ]
+    if not inside or not ring:
+        return 0.0
+    return abs((sum(ring) / len(ring)) - (sum(inside) / len(inside))) / 255.0
+
+
+def _mean_saturation(pixels: list[tuple[int, int, int]]) -> float:
+    if not pixels:
+        return 0.0
+    return sum(colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)[1] for r, g, b in pixels) / len(pixels)
+
+
+def _luminance(r: int, g: int, b: int) -> float:
+    return 0.299 * r + 0.587 * g + 0.114 * b
 
 
 def _component_color_metrics(
@@ -644,10 +801,11 @@ def _inside_ellipse(px: float, py: float, cx: float, cy: float, rx: float, ry: f
 
 
 def _is_black_candidate_pixel(r: int, g: int, b: int, params: DotDetectionParams) -> bool:
-    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    luminance = _luminance(r, g, b)
     red_chroma = r - max(g, b)
-    dark_enough = luminance <= params.black_threshold and max(r, g, b) <= 155
-    very_dark = luminance <= params.black_threshold * 0.80 and max(r, g, b) <= 130
+    threshold = params.black_darkness_threshold
+    dark_enough = luminance <= threshold and max(r, g, b) <= min(185, threshold + 50)
+    very_dark = luminance <= threshold * 0.80 and max(r, g, b) <= min(150, threshold + 15)
     return dark_enough and (red_chroma < 45 or very_dark)
 
 
@@ -704,8 +862,8 @@ def _component_circularity(component: Iterable[tuple[int, int]], mask: set[tuple
 def _black_confidence(pixels: list[tuple[int, int, int]], params: DotDetectionParams) -> float:
     if not pixels:
         return 0.0
-    mean_luminance = sum(0.299 * r + 0.587 * g + 0.114 * b for r, g, b in pixels) / len(pixels)
-    return max(0.0, min(1.0, (params.black_threshold - mean_luminance) / max(params.black_threshold, 1)))
+    mean_luminance = sum(_luminance(r, g, b) for r, g, b in pixels) / len(pixels)
+    return max(0.0, min(1.0, (params.black_darkness_threshold - mean_luminance) / max(params.black_darkness_threshold, 1)))
 
 
 def _red_confidence(pixels: list[tuple[int, int, int]], params: DotDetectionParams) -> float:

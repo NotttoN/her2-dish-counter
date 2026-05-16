@@ -30,6 +30,12 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                 "detected_black_dot_count",
                 "detected_red_dot_count",
                 "overlap_review_candidate_count",
+                "black_cluster_review_candidate_count",
+                "detection_preset",
+                "detection_red_sensitivity",
+                "detection_black_sensitivity",
+                "detection_haze_rejection",
+                "detection_cluster_sensitivity",
             ]
         )
         for n in rows:
@@ -51,6 +57,12 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                     len(n.black_dot_candidates),
                     len(n.red_dot_candidates),
                     len(n.overlap_dot_candidates),
+                    len(n.black_cluster_candidates),
+                    project.detection_settings.preset,
+                    project.detection_settings.red_sensitivity,
+                    project.detection_settings.black_sensitivity,
+                    project.detection_settings.haze_rejection,
+                    project.detection_settings.cluster_sensitivity,
                 ]
             )
 
@@ -156,19 +168,21 @@ def _draw_nucleus(draw, nucleus: NucleusCount, offset: tuple[int, int], bounds: 
     )
     for candidate, dot_outline in [
         *((candidate, "deepskyblue") for candidate in nucleus.black_dot_candidates),
+        *((candidate, "cyan") for candidate in nucleus.black_cluster_candidates),
         *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
         *((candidate, "purple") for candidate in nucleus.overlap_dot_candidates),
     ]:
         is_large_red = candidate.color_type == "large_red"
         is_overlap = candidate.color_type == "overlap_review"
+        is_cluster = candidate.color_type == "black_cluster_review"
         dot_outline = "orange" if is_large_red else dot_outline
-        dot_radius = max(2.0, min(8.0 if is_overlap else 7.0 if is_large_red else 5.0, (float(candidate.area) ** 0.5) / 2.0))
+        dot_radius = max(2.0, min(10.0 if is_cluster else 8.0 if is_overlap else 7.0 if is_large_red else 5.0, (float(candidate.area) ** 0.5) / 2.0))
         dot_x = candidate.x + ox
         dot_y = candidate.y + oy
         draw.ellipse(
             (dot_x - dot_radius, dot_y - dot_radius, dot_x + dot_radius, dot_y + dot_radius),
             outline=dot_outline,
-            width=3 if (is_large_red or is_overlap) else 2,
+            width=3 if (is_large_red or is_overlap or is_cluster) else 2,
         )
         if is_overlap:
             inner_radius = max(1.0, dot_radius - 2.0)
@@ -179,12 +193,21 @@ def _draw_nucleus(draw, nucleus: NucleusCount, offset: tuple[int, int], bounds: 
             )
 
 
-def _draw_summary_panel(draw, panel_box: tuple[int, int, int, int], score: ScoreResult) -> None:
+def _detection_settings_line(project: CaseProject) -> str:
+    settings = project.detection_settings
+    return (
+        "Detection settings: "
+        f"Red {settings.red_sensitivity} / Black {settings.black_sensitivity} / "
+        f"Haze {settings.haze_rejection} / Cluster {settings.cluster_sensitivity}"
+    )
+
+
+def _draw_summary_panel(draw, panel_box: tuple[int, int, int, int], score: ScoreResult, project: CaseProject) -> None:
     panel_left, panel_top, panel_right, panel_bottom = panel_box
     panel_padding = 18
     line_gap = 6
-    title = "HER2-DISH Counter v0.2.5"
-    summary_lines = score_summary_lines(score)
+    title = "HER2-DISH Counter v0.2.7"
+    summary_lines = [*score_summary_lines(score), _detection_settings_line(project)]
     max_text_width = panel_right - panel_left - 2 * panel_padding
 
     disclaimer_lines = _wrap_text(draw, RESEARCH_USE_DISCLAIMER, max_text_width)
@@ -206,11 +229,11 @@ def _draw_summary_panel(draw, panel_box: tuple[int, int, int, int], score: Score
             y += 4
 
 
-def _summary_panel_height(draw, width: int, score: ScoreResult) -> int:
+def _summary_panel_height(draw, width: int, score: ScoreResult, project: CaseProject) -> int:
     panel_padding = 18
     line_gap = 6
     max_text_width = width - 2 * panel_padding
-    panel_lines = ["HER2-DISH Counter v0.2.5", *score_summary_lines(score)]
+    panel_lines = ["HER2-DISH Counter v0.2.7", *score_summary_lines(score), _detection_settings_line(project)]
     panel_lines.extend(_wrap_text(draw, RESEARCH_USE_DISCLAIMER, max_text_width))
     line_height = max(_text_size(draw, line)[1] for line in panel_lines) + line_gap
     title_spacing = 4
@@ -232,12 +255,12 @@ def export_annotated_png(project: CaseProject, path: str | Path, canvas_size: tu
     scratch = Image.new("RGB", (1, 1), "white")
     scratch_draw = ImageDraw.Draw(scratch)
     longest_required_line = max(
-        ["HER2-DISH Counter v0.2.5", *score_summary_lines(score), RESEARCH_USE_DISCLAIMER],
+        ["HER2-DISH Counter v0.2.7", *score_summary_lines(score), _detection_settings_line(project), RESEARCH_USE_DISCLAIMER],
         key=lambda line: _text_size(scratch_draw, line)[0],
     )
     min_panel_width = _text_size(scratch_draw, longest_required_line)[0] + 36
     output_width = max(base_img.width + 2 * image_padding, min_panel_width)
-    panel_height = _summary_panel_height(scratch_draw, output_width, score)
+    panel_height = _summary_panel_height(scratch_draw, output_width, score, project)
     output_height = base_img.height + 2 * image_padding + panel_gap + panel_height
 
     img = Image.new("RGB", (output_width, output_height), "white")
@@ -275,6 +298,6 @@ def export_annotated_png(project: CaseProject, path: str | Path, canvas_size: tu
         _draw_nucleus(draw, nucleus, (image_left, image_top), image_bounds)
 
     panel_top = base_img.height + 2 * image_padding + panel_gap
-    _draw_summary_panel(draw, (0, panel_top, output_width - 1, output_height - 1), score)
+    _draw_summary_panel(draw, (0, panel_top, output_width - 1, output_height - 1), score, project)
 
     img.save(path)
