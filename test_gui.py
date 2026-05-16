@@ -332,7 +332,7 @@ def test_detect_dots_requires_apply_before_cep17_changes(qt_app):
     window.add_nucleus_at(40, 50)
     nucleus = window.project.nuclei[0]
     nucleus.cep17_red = 3
-    nucleus.red_dot_candidates.append(type("Candidate", (), {"x": 42, "y": 50, "area": 160, "color_type": "large_red"})())
+    nucleus.red_dot_candidates.append(type("Candidate", (), {"x": 42, "y": 50, "area": 160, "color_type": "red"})())
     window._refresh_after_selected_nucleus_edit(0)
     qt_app.processEvents()
 
@@ -343,7 +343,7 @@ def test_detect_dots_requires_apply_before_cep17_changes(qt_app):
 
     assert nucleus.cep17_red == 1
     assert window.table.cellWidget(0, 10).value() == 1
-    assert "large red candidate included as 1; please review manually" in window.statusBar().currentMessage()
+    assert "Applied detected counts" in window.statusBar().currentMessage()
     window.table.cellWidget(0, 10).setValue(2)
     qt_app.processEvents()
     assert nucleus.cep17_red == 2

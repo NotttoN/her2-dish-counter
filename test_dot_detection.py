@@ -232,7 +232,7 @@ def test_detection_uses_adjusted_nucleus_roi():
     assert moved[0].x == pytest.approx(82.5, abs=1.0)
 
 
-def test_sensitive_detects_large_red_dot_as_review_candidate():
+def test_sensitive_counts_large_red_component_as_one_cep17_candidate():
     image = _blank_image()
     draw = PIL_ImageDraw.Draw(image)
     _dot(draw, (60, 50), 8, (220, 20, 70))
@@ -242,8 +242,8 @@ def test_sensitive_detects_large_red_dot_as_review_candidate():
     )
 
     assert len(result.candidates) == 1
-    assert result.candidates[0].color_type == "large_red"
-    assert result.stats.large_red_candidates == 1
+    assert result.candidates[0].color_type == "red"
+    assert result.stats.large_red_candidates == 0
 
 
 def test_sensitive_keeps_irregular_red_dot_candidate():
@@ -271,10 +271,7 @@ def test_sensitive_splits_or_retains_close_red_dots():
     )
 
     assert len(result.candidates) in {1, 2}
-    if len(result.candidates) == 1:
-        assert result.candidates[0].color_type == "large_red"
-    else:
-        assert {candidate.color_type for candidate in result.candidates} == {"red"}
+    assert {candidate.color_type for candidate in result.candidates} == {"red"}
 
 
 def test_sensitive_excludes_large_red_dot_outside_nucleus_roi():
@@ -316,7 +313,7 @@ def test_red_dot_with_black_overlap_is_counted_as_cep17_without_overlap_review()
     black = detect_black_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
 
     assert len(result.candidates) == 1
-    assert result.candidates[0].color_type in {"red", "large_red"}
+    assert result.candidates[0].color_type == "red"
     assert len(black) == 1
     assert result.overlap_candidates == []
     assert result.stats.overlap_review_candidates == 0
@@ -333,7 +330,7 @@ def test_large_irregular_red_dot_is_one_cep17_candidate():
     )
 
     assert len(result.candidates) == 1
-    assert result.candidates[0].color_type == "large_red"
+    assert result.candidates[0].color_type == "red"
     assert result.overlap_candidates == []
 
 
@@ -378,7 +375,8 @@ def test_large_red_component_is_one_final_cep17_candidate():
 
     assert result.stats.connected_components == 1
     assert len(result.candidates) == 1
-    assert result.candidates[0].color_type == "large_red"
+    assert result.candidates[0].color_type == "red"
+    assert result.stats.large_red_candidates == 0
     assert result.stats.final_cep17_candidates == 1
 
 
@@ -400,14 +398,14 @@ def test_duplicate_red_candidates_from_same_component_are_merged():
     candidates, merged_count = _merge_duplicate_red_candidates(
         [
             (1, DotCandidate(x=50.0, y=50.0, area=20.0, confidence=0.7, color_type="red")),
-            (1, DotCandidate(x=53.0, y=50.0, area=25.0, confidence=0.8, color_type="large_red")),
+            (1, DotCandidate(x=53.0, y=50.0, area=25.0, confidence=0.8, color_type="red")),
         ],
         merge_distance_px=6.0,
     )
 
     assert len(candidates) == 1
     assert merged_count == 1
-    assert candidates[0].color_type == "large_red"
+    assert candidates[0].color_type == "red"
 
 
 def test_near_duplicate_red_candidates_are_merged_by_distance():
@@ -445,6 +443,16 @@ def test_very_dark_reddish_black_dot_is_kept_as_her2_not_cep17():
     red = detect_red_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
 
     assert len(black) == 1
+    assert red == []
+
+
+def test_sensitive_rejects_black_dominant_reddish_candidate():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 4, (118, 38, 32))
+
+    red = detect_red_dots(image, 60, 50, 35, 28, params_from_sliders(95, 50, 50, 50))
+
     assert red == []
 
 
@@ -534,7 +542,7 @@ def test_overlapping_red_and_black_signals_are_independent_candidates():
     assert len(red_result.candidates) == 1
     assert len(black) == 1
     assert red_result.overlap_candidates == []
-    assert {candidate.color_type for candidate in red_result.candidates} <= {"red", "large_red"}
+    assert {candidate.color_type for candidate in red_result.candidates} == {"red"}
 
 
 def test_red_signal_inside_black_cluster_is_cep17_and_cluster_is_review_only():

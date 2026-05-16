@@ -29,8 +29,7 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                 "comment",
                 "detected_black_dot_count",
                 "detected_red_dot_count",
-                "detected_large_red_count",
-                "black_cluster_review_candidate_count",
+                "detected_black_cluster_candidate_count",
                 "detection_preset",
                 "detection_red_sensitivity",
                 "detection_black_sensitivity",
@@ -56,7 +55,6 @@ def export_csv(project: CaseProject, path: str | Path) -> None:
                     n.comment,
                     len(n.black_dot_candidates),
                     len(n.red_dot_candidates),
-                    sum(1 for candidate in n.red_dot_candidates if candidate.color_type == "large_red"),
                     len(n.black_cluster_candidates),
                     project.detection_settings.preset,
                     project.detection_settings.red_sensitivity,
@@ -171,16 +169,14 @@ def _draw_nucleus(draw, nucleus: NucleusCount, offset: tuple[int, int], bounds: 
         *((candidate, "cyan") for candidate in nucleus.black_cluster_candidates),
         *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
     ]:
-        is_large_red = candidate.color_type == "large_red"
         is_cluster = candidate.color_type == "black_cluster_review"
-        dot_outline = "orange" if is_large_red else dot_outline
-        dot_radius = max(2.0, min(10.0 if is_cluster else 7.0 if is_large_red else 5.0, (float(candidate.area) ** 0.5) / 2.0))
+        dot_radius = max(2.0, min(10.0 if is_cluster else 5.0, (float(candidate.area) ** 0.5) / 2.0))
         dot_x = candidate.x + ox
         dot_y = candidate.y + oy
         draw.ellipse(
             (dot_x - dot_radius, dot_y - dot_radius, dot_x + dot_radius, dot_y + dot_radius),
             outline=dot_outline,
-            width=3 if (is_large_red or is_cluster) else 2,
+            width=3 if is_cluster else 2,
         )
 
 

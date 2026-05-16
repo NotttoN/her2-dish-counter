@@ -62,9 +62,9 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     assert rows[0]["effective_her2"] == "10"
     assert rows[0]["detected_black_dot_count"] == "0"
     assert rows[0]["detected_red_dot_count"] == "0"
-    assert rows[0]["detected_large_red_count"] == "0"
+    assert "detected_large_red_count" not in rows[0]
     assert "overlap_review_candidate_count" not in rows[0]
-    assert rows[0]["black_cluster_review_candidate_count"] == "0"
+    assert rows[0]["detected_black_cluster_candidate_count"] == "0"
     assert rows[0]["detection_red_sensitivity"] == "61"
     assert rows[0]["detection_black_sensitivity"] == "62"
     assert rows[0]["detection_haze_rejection"] == "63"
@@ -162,3 +162,30 @@ def test_load_project_accepts_legacy_overlap_candidates(tmp_path):
 
     assert len(loaded.nuclei) == 1
     assert len(loaded.nuclei[0].overlap_dot_candidates) == 1
+
+
+def test_save_project_normalizes_legacy_large_red_candidates(tmp_path):
+    from her2dish.core.dot_detection import DotCandidate
+
+    nucleus = NucleusCount(nucleus_id=1, x=10, y=20)
+    nucleus.red_dot_candidates.append(DotCandidate(x=10, y=20, area=250, color_type="large_red"))
+    project = CaseProject(nuclei=[nucleus])
+
+    path = tmp_path / "project.json"
+    save_project(project, path)
+
+    saved = path.read_text(encoding="utf-8")
+    assert "large_red" not in saved
+    assert '"color_type": "red"' in saved
+
+
+def test_load_project_normalizes_legacy_large_red_candidates(tmp_path):
+    path = tmp_path / "legacy-large-red.json"
+    path.write_text(
+        '{"nuclei": [{"nucleus_id": 1, "x": 10, "y": 20, "red_dot_candidates": [{"x": 10, "y": 20, "area": 250, "color_type": "large_red"}]}]}',
+        encoding="utf-8",
+    )
+
+    loaded = load_project(path)
+
+    assert loaded.nuclei[0].red_dot_candidates[0].color_type == "red"

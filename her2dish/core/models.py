@@ -125,7 +125,11 @@ class NucleusCount:
         data = asdict(self)
         # Keep loading legacy overlap candidates, but do not write them into new
         # JSON project files now that overlap review is no longer a category.
+        # Legacy large_red candidates are saved as ordinary red CEP17 candidates.
         data.pop("overlap_dot_candidates", None)
+        for candidate in data.get("red_dot_candidates", []):
+            if candidate.get("color_type") == "large_red":
+                candidate["color_type"] = "red"
         return data
 
     @classmethod
@@ -147,7 +151,8 @@ class NucleusCount:
             DotCandidate.from_dict(item, "black") for item in (payload.get("black_dot_candidates") or [])
         ]
         payload["red_dot_candidates"] = [
-            DotCandidate.from_dict(item, "red") for item in (payload.get("red_dot_candidates") or [])
+            _normalize_red_candidate(DotCandidate.from_dict(item, "red"))
+            for item in (payload.get("red_dot_candidates") or [])
         ]
         payload["overlap_dot_candidates"] = [
             DotCandidate.from_dict(item, "overlap_review")
@@ -158,6 +163,12 @@ class NucleusCount:
             for item in (payload.get("black_cluster_candidates") or [])
         ]
         return cls(**payload)
+
+
+def _normalize_red_candidate(candidate: DotCandidate) -> DotCandidate:
+    if candidate.color_type == "large_red":
+        candidate.color_type = "red"
+    return candidate
 
 
 @dataclass
