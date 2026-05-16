@@ -304,7 +304,7 @@ def test_black_dot_only_is_not_detected_as_cep17_candidate():
     assert result.overlap_candidates == []
 
 
-def test_red_dot_with_black_overlap_is_review_only_not_cep17():
+def test_red_dot_with_black_overlap_is_counted_as_cep17_without_overlap_review():
     image = _blank_image()
     draw = PIL_ImageDraw.Draw(image)
     _dot(draw, (60, 50), 7, (220, 20, 70))
@@ -313,11 +313,13 @@ def test_red_dot_with_black_overlap_is_review_only_not_cep17():
     result = detect_red_dots_with_debug(
         image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
     )
+    black = detect_black_dots(image, 60, 50, 35, 28, red_detection_params_for_preset("Standard"))
 
-    assert result.candidates == []
-    assert len(result.overlap_candidates) == 1
-    assert result.overlap_candidates[0].color_type == "overlap_review"
-    assert result.stats.overlap_review_candidates == 1
+    assert len(result.candidates) == 1
+    assert result.candidates[0].color_type in {"red", "large_red"}
+    assert len(black) == 1
+    assert result.overlap_candidates == []
+    assert result.stats.overlap_review_candidates == 0
 
 
 def test_large_irregular_red_dot_is_one_cep17_candidate():
@@ -517,3 +519,60 @@ def test_cluster_candidate_is_review_only_candidate_type():
 
     assert len(candidates) == 1
     assert candidates[0].color_type == "black_cluster_review"
+
+
+def test_overlapping_red_and_black_signals_are_independent_candidates():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (58, 50), 5, (220, 20, 70))
+    _dot(draw, (62, 50), 3, (15, 15, 15))
+
+    params = red_detection_params_for_preset("Standard")
+    red_result = detect_red_dots_with_debug(image, 60, 50, 35, 28, params)
+    black = detect_black_dots(image, 60, 50, 35, 28, params)
+
+    assert len(red_result.candidates) == 1
+    assert len(black) == 1
+    assert red_result.overlap_candidates == []
+    assert {candidate.color_type for candidate in red_result.candidates} <= {"red", "large_red"}
+
+
+def test_red_signal_inside_black_cluster_is_cep17_and_cluster_is_review_only():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 9, (35, 33, 31))
+    _dot(draw, (60, 50), 3, (220, 20, 70))
+
+    params = params_from_sliders(80, 50, 50, 95)
+    red_result = detect_red_dots_with_debug(image, 60, 50, 35, 28, params)
+    clusters = detect_black_cluster_candidates(image, 60, 50, 35, 28, params)
+    black_dots = detect_black_dots(image, 60, 50, 35, 28, params)
+    nucleus = NucleusCount(nucleus_id=1, x=60, y=50)
+    nucleus.red_dot_candidates = red_result.candidates
+    nucleus.black_dot_candidates = black_dots
+    nucleus.black_cluster_candidates = clusters
+    nucleus.her2_black = len(nucleus.black_dot_candidates)
+    nucleus.cep17_red = len(nucleus.red_dot_candidates)
+
+    assert len(red_result.candidates) == 1
+    assert len(clusters) == 1
+    assert clusters[0].color_type == "black_cluster_review"
+    assert nucleus.her2_black == len(black_dots)
+    assert nucleus.small_cluster_count == 0
+    assert nucleus.large_cluster_count == 0
+    assert nucleus.cep17_red == 1
+
+
+def test_new_detection_never_emits_overlap_review_candidate_type():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 7, (220, 20, 70))
+    _dot(draw, (60, 50), 3, (15, 15, 15))
+
+    result = detect_red_dots_with_debug(
+        image, 60, 50, 35, 28, red_detection_params_for_preset("Standard")
+    )
+
+    assert result.overlap_candidates == []
+    assert all(candidate.color_type != "overlap_review" for candidate in result.candidates)
+    assert result.stats.overlap_review_candidates == 0

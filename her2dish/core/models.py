@@ -122,7 +122,11 @@ class NucleusCount:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        # Keep loading legacy overlap candidates, but do not write them into new
+        # JSON project files now that overlap review is no longer a category.
+        data.pop("overlap_dot_candidates", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NucleusCount":

@@ -88,7 +88,13 @@ class ComponentDetectionStats:
 
 @dataclass(frozen=True)
 class RedDotDetectionResult:
-    """CEP17 and red/black-overlap review candidates with red-mask debug counters."""
+    """CEP17 candidates with red-mask debug counters.
+
+    ``overlap_candidates`` is kept as a backward-compatible attribute for older
+    callers and project files, but new detection does not create overlap review
+    candidates. Red/magenta signal remains a CEP17 candidate even when black
+    HER2 signal is adjacent or overlapping.
+    """
 
     candidates: list[DotCandidate]
     overlap_candidates: list[DotCandidate]
@@ -128,7 +134,7 @@ RED_SENSITIVITY_PRESETS: dict[str, DotDetectionParams] = {
         red_circularity_threshold=0.02,
         red_large_min_area=100.0,
         red_peak_min_distance=4.0,
-        red_duplicate_merge_distance_px=5.0,
+        red_duplicate_merge_distance_px=14.0,
     ),
 }
 
@@ -387,30 +393,18 @@ def _detect_red_components(
     radius_y: float,
     params: DotDetectionParams,
 ) -> tuple[list[DotCandidate], list[DotCandidate], ComponentDetectionStats]:
-    """Detect CEP17 candidates while separating red/black overlap reviews.
+    """Detect CEP17 candidates without creating overlap review candidates.
 
     Red CEP17 candidates are intentionally semi-automatic suggestions. Large or
-    low-circularity red components are treated as one CEP17 candidate by default;
-    black-dominant or mixed components near HER2 black pixels are removed from
-    normal red counts and, when enough red/magenta signal surrounds them, are
-    returned as ``overlap_review`` display-only candidates.
+    low-circularity red components are treated as one CEP17 candidate by default.
+    Red/magenta components are not suppressed merely because a black HER2 dot or
+    black cluster is adjacent or overlapping; those black signals are detected
+    independently by the black dot/cluster paths.
     """
 
     pixels, width, height = _coerce_rgb_pixels(image_rgb)
     if radius_x <= 0 or radius_y <= 0 or width <= 0 or height <= 0:
         return [], [], ComponentDetectionStats()
-
-    black_mask = _component_mask(
-        pixels,
-        width,
-        height,
-        nucleus_x,
-        nucleus_y,
-        radius_x,
-        radius_y,
-        lambda r, g, b: _is_black_candidate_pixel(r, g, b, params),
-    )
-    black_components = _components_from_mask(black_mask)
 
     mask = _component_mask(
         pixels,
@@ -424,7 +418,6 @@ def _detect_red_components(
     )
 
     candidates_by_component: list[tuple[int, DotCandidate]] = []
-    overlap_candidates: list[DotCandidate] = []
     visited: set[tuple[int, int]] = set()
     connected_components = 0
     area_pass_components = 0
@@ -455,7 +448,6 @@ def _detect_red_components(
         roi_pass_components += 1
 
         component_pixels = [pixels[y][x] for x, y in component]
-        metrics = _component_color_metrics(component, pixels, width, height)
         local_contrast = _component_local_contrast(component, pixels, width, height)
         mean_saturation = _mean_saturation(component_pixels)
         haze_like = (
@@ -470,22 +462,6 @@ def _detect_red_components(
         base_confidence = _red_confidence(component_pixels, params)
         confidence = max(0.0, min(1.0, base_confidence * (0.70 + 0.30 * min(1.0, circularity))))
         is_large = area >= params.red_large_min_area or area > params.red_max_area or not circularity_passed
-        overlaps_black = _component_strongly_overlaps_black(component, cx, cy, black_components)
-        black_dominant = metrics["black_score"] >= metrics["red_score"] * 1.15 and metrics["dark_ratio"] >= 0.25
-        mixed_overlap = overlaps_black and metrics["red_ratio"] >= 0.12 and metrics["dark_ratio"] >= 0.08
-        if black_dominant or mixed_overlap:
-            if metrics["red_ratio"] >= 0.12:
-                overlap_candidates.append(
-                    DotCandidate(
-                        x=float(cx),
-                        y=float(cy),
-                        area=area,
-                        confidence=max(confidence, min(1.0, metrics["red_score"])),
-                        color_type="overlap_review",
-                    )
-                )
-            continue
-
         color_type = "large_red" if is_large else "red"
         if color_type == "large_red":
             large_red_candidates += 1
@@ -506,7 +482,6 @@ def _detect_red_components(
         candidates_by_component, params.red_duplicate_merge_distance_px
     )
     candidates.sort(key=lambda c: (c.y, c.x))
-    overlap_candidates.sort(key=lambda c: (c.y, c.x))
     stats = ComponentDetectionStats(
         mask_pixels=len(mask),
         connected_components=connected_components,
@@ -515,12 +490,12 @@ def _detect_red_components(
         roi_pass_components=roi_pass_components,
         detected_candidates=len(candidates),
         large_red_candidates=sum(1 for candidate in candidates if candidate.color_type == "large_red"),
-        overlap_review_candidates=len(overlap_candidates),
+        overlap_review_candidates=0,
         red_haze_rejected_components=red_haze_rejected_components,
         merged_duplicate_red_candidates=merged_duplicate_red_candidates,
         final_cep17_candidates=len(candidates),
     )
-    return candidates, overlap_candidates, stats
+    return candidates, [], stats
 
 
 def _merge_duplicate_red_candidates(
@@ -532,7 +507,7 @@ def _merge_duplicate_red_candidates(
     each red connected component.  This safeguard also collapses any future
     near-duplicate candidates whose centers are closer than the configured
     merge distance, preferring ordinary/large red candidates over debug-only
-    overlap candidates (which are not passed into this final-count path).
+    legacy overlap candidates (which are not passed into this final-count path).
     """
 
     if not candidates_by_component:
@@ -584,34 +559,6 @@ def _components_from_mask(mask: set[tuple[int, int]]) -> list[list[tuple[int, in
         if seed not in visited:
             components.append(_flood_component(seed, mask, visited))
     return components
-
-
-def _component_strongly_overlaps_black(
-    component: Iterable[tuple[int, int]],
-    cx: float,
-    cy: float,
-    black_components: list[list[tuple[int, int]]],
-) -> bool:
-    points = set(component)
-    if not points:
-        return False
-    for black_component in black_components:
-        black_points = set(black_component)
-        if len(black_points) < 4:
-            continue
-        bx, by = _component_centroid(black_points)
-        black_radius = max(2.5, math.sqrt(len(black_points) / math.pi) + 1.5)
-        center_near_black = (cx - bx) ** 2 + (cy - by) ** 2 <= black_radius * black_radius
-        expanded_black = {
-            (x + dx, y + dy)
-            for x, y in black_points
-            for dx in (-1, 0, 1)
-            for dy in (-1, 0, 1)
-        }
-        red_border_touches_black = bool(points & expanded_black)
-        if center_near_black or red_border_touches_black:
-            return True
-    return False
 
 
 def _component_local_contrast(
