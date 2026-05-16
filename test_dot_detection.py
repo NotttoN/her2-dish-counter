@@ -8,12 +8,14 @@ PIL_ImageDraw = pytest.importorskip("PIL.ImageDraw")
 from her2dish.core.dot_detection import (
     DotCandidate,
     _merge_duplicate_red_candidates,
+    detect_black_cluster_candidates,
     detect_black_dots,
     detect_red_dots,
     detect_red_dots_with_debug,
+    params_from_sliders,
     red_detection_params_for_preset,
 )
-from her2dish.core.models import CaseProject, NucleusCount
+from her2dish.core.models import CaseProject, DetectionSettings, NucleusCount
 from her2dish.core.project_io import load_project, save_project
 
 
@@ -25,6 +27,60 @@ def _dot(draw, xy, radius, fill):
     x, y = xy
     draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
 
+
+
+
+def test_params_from_sliders_returns_clamped_detection_params():
+    params = params_from_sliders(-10, 50, 125, 80)
+
+    assert params.red_sensitivity == 0
+    assert params.black_sensitivity == 50
+    assert params.haze_rejection == 100
+    assert params.cluster_sensitivity == 80
+    assert params.red_min_area > 0
+    assert params.black_cluster_max_area > params.black_cluster_min_area
+
+
+def test_red_sensitivity_slider_moves_thresholds_toward_pale_red_detection():
+    low = params_from_sliders(10, 50, 50, 50)
+    high = params_from_sliders(90, 50, 50, 50)
+
+    assert high.red_saturation_threshold < low.red_saturation_threshold
+    assert high.red_value_threshold < low.red_value_threshold
+    assert high.red_min_area < low.red_min_area
+    assert high.red_max_area > low.red_max_area
+    assert high.red_circularity_threshold < low.red_circularity_threshold
+
+
+def test_black_sensitivity_slider_moves_thresholds_toward_faint_black_detection():
+    low = params_from_sliders(50, 10, 50, 50)
+    high = params_from_sliders(50, 90, 50, 50)
+
+    assert high.black_darkness_threshold > low.black_darkness_threshold
+    assert high.black_min_area < low.black_min_area
+    assert high.black_max_area > low.black_max_area
+    assert high.black_local_contrast_threshold < low.black_local_contrast_threshold
+    assert high.black_circularity_threshold < low.black_circularity_threshold
+
+
+def test_haze_rejection_slider_moves_thresholds_toward_stronger_rejection():
+    low = params_from_sliders(50, 50, 10, 50)
+    high = params_from_sliders(50, 50, 90, 50)
+
+    assert high.red_haze_saturation_threshold > low.red_haze_saturation_threshold
+    assert high.red_haze_local_contrast_threshold > low.red_haze_local_contrast_threshold
+    assert high.red_haze_area_threshold < low.red_haze_area_threshold
+    assert high.red_haze_rejection_strength > low.red_haze_rejection_strength
+
+
+def test_cluster_sensitivity_slider_moves_thresholds_toward_more_review_candidates():
+    low = params_from_sliders(50, 50, 50, 10)
+    high = params_from_sliders(50, 50, 50, 90)
+
+    assert high.black_cluster_min_area < low.black_cluster_min_area
+    assert high.black_cluster_max_area > low.black_cluster_max_area
+    assert high.black_cluster_darkness_threshold > low.black_cluster_darkness_threshold
+    assert high.black_cluster_compactness_threshold < low.black_cluster_compactness_threshold
 
 def test_detect_black_dots_counts_synthetic_candidates():
     image = _blank_image()
@@ -388,3 +444,76 @@ def test_very_dark_reddish_black_dot_is_kept_as_her2_not_cep17():
 
     assert len(black) == 1
     assert red == []
+
+
+def test_json_roundtrip_preserves_detection_settings(tmp_path):
+    project = CaseProject(
+        detection_settings=DetectionSettings(
+            preset="Custom",
+            red_sensitivity=72,
+            black_sensitivity=64,
+            haze_rejection=83,
+            cluster_sensitivity=91,
+        )
+    )
+
+    path = tmp_path / "settings.json"
+    save_project(project, path)
+    loaded = load_project(path)
+
+    assert loaded.detection_settings.preset == "Custom"
+    assert loaded.detection_settings.red_sensitivity == 72
+    assert loaded.detection_settings.black_sensitivity == 64
+    assert loaded.detection_settings.haze_rejection == 83
+    assert loaded.detection_settings.cluster_sensitivity == 91
+
+
+def test_missing_detection_settings_loads_defaults(tmp_path):
+    path = tmp_path / "legacy.json"
+    path.write_text('{"nuclei": []}', encoding="utf-8")
+
+    loaded = load_project(path)
+
+    assert loaded.detection_settings.preset == "Standard"
+    assert loaded.detection_settings.red_sensitivity == 50
+    assert loaded.detection_settings.black_sensitivity == 50
+    assert loaded.detection_settings.haze_rejection == 50
+    assert loaded.detection_settings.cluster_sensitivity == 50
+
+
+def test_slider_sensitivity_changes_synthetic_detection_counts():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (48, 50), 2, (235, 200, 205))
+    _dot(draw, (62, 50), 2, (235, 200, 205))
+    _dot(draw, (76, 50), 2, (132, 130, 128))
+    _dot(draw, (90, 50), 2, (132, 130, 128))
+
+    low = params_from_sliders(10, 10, 50, 50)
+    high = params_from_sliders(95, 95, 50, 50)
+
+    assert len(detect_red_dots(image, 60, 50, 45, 28, high)) > len(detect_red_dots(image, 60, 50, 45, 28, low))
+    assert len(detect_black_dots(image, 60, 50, 45, 28, high)) > len(detect_black_dots(image, 60, 50, 45, 28, low))
+
+
+def test_high_haze_rejection_removes_broad_pale_red_component():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    draw.ellipse((20, 30, 70, 65), fill=(230, 195, 200))
+
+    low_haze = detect_red_dots_with_debug(image, 60, 50, 55, 40, params_from_sliders(95, 50, 10, 50))
+    high_haze = detect_red_dots_with_debug(image, 60, 50, 55, 40, params_from_sliders(95, 50, 95, 50))
+
+    assert len(high_haze.candidates) < len(low_haze.candidates)
+    assert high_haze.stats.red_haze_rejected_components == 1
+
+
+def test_cluster_candidate_is_review_only_candidate_type():
+    image = _blank_image()
+    draw = PIL_ImageDraw.Draw(image)
+    _dot(draw, (60, 50), 7, (35, 33, 31))
+
+    candidates = detect_black_cluster_candidates(image, 60, 50, 35, 28, params_from_sliders(50, 50, 50, 95))
+
+    assert len(candidates) == 1
+    assert candidates[0].color_type == "black_cluster_review"

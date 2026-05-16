@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSlider,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -36,12 +37,14 @@ from her2dish.core.constants import RESEARCH_USE_DISCLAIMER
 from her2dish.core.dot_detection import (
     RED_SENSITIVITY_PRESETS,
     ComponentDetectionStats,
+    DotDetectionParams,
+    detect_black_cluster_candidates,
     detect_black_dots,
     detect_red_dots_with_debug,
-    red_detection_params_for_preset,
+    params_from_sliders,
 )
 from her2dish.core.exporters import export_annotated_png, export_csv
-from her2dish.core.models import CaseProject, NucleusCount, RoiRectangle
+from her2dish.core.models import CaseProject, DetectionSettings, NucleusCount, RoiRectangle
 from her2dish.core.project_io import load_project, save_project
 from her2dish.core.scoring import calculate_score
 from image_viewer import ImageViewer
@@ -96,11 +99,11 @@ TABLE_COLUMN_WIDTHS = {
 
 
 class MainWindow(QMainWindow):
-    """Main window for HER2-DISH Counter v0.2.5."""
+    """Main window for HER2-DISH Counter v0.2.7."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("HER2-DISH Counter v0.2.5")
+        self.setWindowTitle("HER2-DISH Counter v0.2.7")
         self.resize(1280, 760)
         self.project = CaseProject()
         self.roi_only_mode = False
@@ -108,7 +111,8 @@ class MainWindow(QMainWindow):
         self.selected_nucleus_id: int | None = None
         self.last_red_detection_stats: ComponentDetectionStats | None = None
         self.last_red_detection_nucleus_id: int | None = None
-        self.last_red_detection_preset = "Standard"
+        self.last_detection_params: DotDetectionParams | None = None
+        self._applying_detection_preset = False
 
         self._build_menu()
         self._build_ui()
@@ -131,7 +135,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        title = QLabel("HER2-DISH Counter v0.2.5")
+        title = QLabel("HER2-DISH Counter v0.2.7")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
@@ -187,17 +191,38 @@ class MainWindow(QMainWindow):
         controls.addStretch(1)
         right.addLayout(controls)
 
-        dot_controls = QHBoxLayout()
-        dot_controls.addWidget(QLabel("Red sensitivity:"))
+        slider_panel = QVBoxLayout()
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Preset:"))
         self.red_sensitivity_combo = QComboBox(self)
-        self.red_sensitivity_combo.addItems(RED_SENSITIVITY_PRESETS.keys())
-        self.red_sensitivity_combo.setCurrentText("Standard")
-        self.red_sensitivity_combo.currentTextChanged.connect(self._red_sensitivity_changed)
-        dot_controls.addWidget(self.red_sensitivity_combo)
+        self.red_sensitivity_combo.addItems([*RED_SENSITIVITY_PRESETS.keys(), "Custom"])
+        self.red_sensitivity_combo.setCurrentText(self.project.detection_settings.preset)
+        self.red_sensitivity_combo.currentTextChanged.connect(self._detection_preset_changed)
+        preset_row.addWidget(self.red_sensitivity_combo)
+        preset_row.addStretch(1)
+        slider_panel.addLayout(preset_row)
+        self.red_sensitivity_slider, self.red_sensitivity_spin = self._make_detection_slider(
+            "Red sensitivity", self.project.detection_settings.red_sensitivity, slider_panel
+        )
+        self.black_sensitivity_slider, self.black_sensitivity_spin = self._make_detection_slider(
+            "Black sensitivity", self.project.detection_settings.black_sensitivity, slider_panel
+        )
+        self.haze_rejection_slider, self.haze_rejection_spin = self._make_detection_slider(
+            "Haze rejection", self.project.detection_settings.haze_rejection, slider_panel
+        )
+        self.cluster_sensitivity_slider, self.cluster_sensitivity_spin = self._make_detection_slider(
+            "Cluster sensitivity", self.project.detection_settings.cluster_sensitivity, slider_panel
+        )
+        right.addLayout(slider_panel)
 
+        dot_controls = QHBoxLayout()
         self.detect_dots_button = QPushButton("Detect dots")
         self.detect_dots_button.clicked.connect(self.detect_dots_for_selected_nucleus)
         dot_controls.addWidget(self.detect_dots_button)
+
+        self.redetect_dots_button = QPushButton("Re-detect current nucleus")
+        self.redetect_dots_button.clicked.connect(self.detect_dots_for_selected_nucleus)
+        dot_controls.addWidget(self.redetect_dots_button)
 
         self.apply_detected_counts_button = QPushButton("Apply detected counts")
         self.apply_detected_counts_button.clicked.connect(self.apply_detected_counts_to_selected_nucleus)
@@ -273,6 +298,23 @@ class MainWindow(QMainWindow):
             spin.valueChanged.connect(on_change)
         return spin
 
+    def _make_detection_slider(self, label: str, value: int, parent_layout: QVBoxLayout) -> tuple[QSlider, QSpinBox]:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        slider = QSlider(Qt.Orientation.Horizontal, self)
+        slider.setRange(0, 100)
+        slider.setValue(value)
+        spin = QSpinBox(self)
+        spin.setRange(0, 100)
+        spin.setValue(value)
+        slider.valueChanged.connect(spin.setValue)
+        spin.valueChanged.connect(slider.setValue)
+        slider.valueChanged.connect(self._detection_slider_changed)
+        row.addWidget(slider, stretch=1)
+        row.addWidget(spin)
+        parent_layout.addLayout(row)
+        return slider, spin
+
     def open_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open image", "", IMAGE_FILTER)
         if not path:
@@ -305,6 +347,7 @@ class MainWindow(QMainWindow):
         self.selected_nucleus_id = None
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
+        self._apply_detection_settings_to_ui()
         self.refresh_table_from_project()
         self.viewer.set_roi(self.project.roi)
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
@@ -324,9 +367,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Detect dots", "Open an image before detecting dots.")
             return
         image = Image.open(image_path).convert("RGB")
-        self.last_red_detection_preset = self.red_sensitivity_combo.currentText()
-        params = red_detection_params_for_preset(self.last_red_detection_preset)
+        params = self._current_detection_params()
+        self.last_detection_params = params
         nucleus.black_dot_candidates = detect_black_dots(
+            image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
+        )
+        nucleus.black_cluster_candidates = detect_black_cluster_candidates(
             image, nucleus.x, nucleus.y, nucleus.radius_x, nucleus.radius_y, params
         )
         red_result = detect_red_dots_with_debug(
@@ -341,6 +387,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Detected candidates for nucleus #{nucleus.nucleus_id}: "
             f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
+            f"cluster review={len(nucleus.black_cluster_candidates)}, "
             f"overlap review={len(nucleus.overlap_dot_candidates)}"
         )
 
@@ -359,6 +406,8 @@ class MainWindow(QMainWindow):
             review_notes.append("large red candidate included as 1; please review manually")
         if overlap_count:
             review_notes.append("overlap review candidates not applied")
+        if nucleus.black_cluster_candidates:
+            review_notes.append("black cluster review candidates not applied")
         review_note = f"; {'; '.join(review_notes)}" if review_notes else ""
         self.statusBar().showMessage(
             f"Applied detected counts to nucleus #{nucleus.nucleus_id}; manual edits remain enabled"
@@ -373,6 +422,7 @@ class MainWindow(QMainWindow):
         nucleus.black_dot_candidates.clear()
         nucleus.red_dot_candidates.clear()
         nucleus.overlap_dot_candidates.clear()
+        nucleus.black_cluster_candidates.clear()
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
@@ -430,6 +480,7 @@ class MainWindow(QMainWindow):
         nucleus.black_dot_candidates.clear()
         nucleus.red_dot_candidates.clear()
         nucleus.overlap_dot_candidates.clear()
+        nucleus.black_cluster_candidates.clear()
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
         self._refresh_after_selected_nucleus_edit(row)
@@ -518,6 +569,7 @@ class MainWindow(QMainWindow):
         self.selected_nucleus_id = None
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
+        self._apply_detection_settings_to_ui()
         self.refresh_table_from_project()
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()
@@ -587,6 +639,7 @@ class MainWindow(QMainWindow):
                     f"Effective HER2: {nucleus.effective_her2}",
                     f"Detected HER2 candidates: {len(nucleus.black_dot_candidates)}",
                     f"Detected CEP17 candidates: {len(nucleus.red_dot_candidates)}",
+                    f"Black cluster review candidates: {len(nucleus.black_cluster_candidates)}",
                     f"Overlap review candidates: {len(nucleus.overlap_dot_candidates)}",
                     f"Large red candidates: {self._large_red_candidate_count(nucleus)}",
                     *red_debug_lines,
@@ -596,18 +649,31 @@ class MainWindow(QMainWindow):
         self.dot_candidates_label.setText(
             f"Dot candidates for selected nucleus: "
             f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
+            f"cluster review={len(nucleus.black_cluster_candidates)}, "
             f"overlap review={len(nucleus.overlap_dot_candidates)} "
             f"(large red={self._large_red_candidate_count(nucleus)}). "
-            "Overlap candidates are not automatically applied. "
-            "Please adjust HER2/CEP17 manually if needed."
+            "Cluster and overlap candidates are not automatically applied. "
+            "Please adjust HER2/CEP17/cluster fields manually if needed."
         )
 
     def _red_debug_lines(self, nucleus: NucleusCount) -> list[str]:
+        params = self.last_detection_params or self._current_detection_params()
+        lines = [
+            "Detection sliders:",
+            f"Red sensitivity: {params.red_sensitivity}",
+            f"Black sensitivity: {params.black_sensitivity}",
+            f"Haze rejection: {params.haze_rejection}",
+            f"Cluster sensitivity: {params.cluster_sensitivity}",
+            f"red_min_area: {params.red_min_area:.1f}",
+            f"red_max_area: {params.red_max_area:.1f}",
+            f"black_min_area: {params.black_min_area:.1f}",
+            f"black_max_area: {params.black_max_area:.1f}",
+        ]
         if self.last_red_detection_stats is None or self.last_red_detection_nucleus_id != nucleus.nucleus_id:
-            return [f"Red sensitivity: {self.last_red_detection_preset}"]
+            return lines
         stats = self.last_red_detection_stats
         return [
-            f"Red sensitivity: {self.last_red_detection_preset}",
+            *lines,
             f"Red mask pixels: {stats.mask_pixels}",
             f"Red connected components: {stats.connected_components}",
             f"Red components after area filter: {stats.area_pass_components}",
@@ -615,17 +681,76 @@ class MainWindow(QMainWindow):
             f"Final CEP17 candidates: {stats.final_cep17_candidates}",
             f"Overlap review candidates: {stats.overlap_review_candidates}",
             f"Large red candidates: {stats.large_red_candidates}",
+            f"Red haze rejected components: {stats.red_haze_rejected_components}",
             f"Merged duplicate red candidates: {stats.merged_duplicate_red_candidates}",
-            "Note: Final CEP17 candidates are applied; overlap review candidates are display-only.",
+            "Note: Final CEP17 candidates are applied; cluster/overlap review candidates are display-only.",
         ]
 
     def _large_red_candidate_count(self, nucleus: NucleusCount) -> int:
         return sum(1 for candidate in nucleus.red_dot_candidates if candidate.color_type == "large_red")
 
-    def _red_sensitivity_changed(self, preset_name: str) -> None:
-        self.last_red_detection_preset = preset_name
+    def _current_detection_params(self) -> DotDetectionParams:
+        self.project.detection_settings = DetectionSettings(
+            preset=self.red_sensitivity_combo.currentText(),
+            red_sensitivity=self.red_sensitivity_slider.value(),
+            black_sensitivity=self.black_sensitivity_slider.value(),
+            haze_rejection=self.haze_rejection_slider.value(),
+            cluster_sensitivity=self.cluster_sensitivity_slider.value(),
+        )
+        return params_from_sliders(
+            self.project.detection_settings.red_sensitivity,
+            self.project.detection_settings.black_sensitivity,
+            self.project.detection_settings.haze_rejection,
+            self.project.detection_settings.cluster_sensitivity,
+        )
+
+    def _apply_detection_settings_to_ui(self) -> None:
+        settings = self.project.detection_settings
+        for slider, spin, value in [
+            (self.red_sensitivity_slider, self.red_sensitivity_spin, settings.red_sensitivity),
+            (self.black_sensitivity_slider, self.black_sensitivity_spin, settings.black_sensitivity),
+            (self.haze_rejection_slider, self.haze_rejection_spin, settings.haze_rejection),
+            (self.cluster_sensitivity_slider, self.cluster_sensitivity_spin, settings.cluster_sensitivity),
+        ]:
+            slider_blocker = QSignalBlocker(slider)
+            spin_blocker = QSignalBlocker(spin)
+            slider.setValue(value)
+            spin.setValue(value)
+            del spin_blocker
+            del slider_blocker
+        self.red_sensitivity_combo.setCurrentText(settings.preset if settings.preset in {"Conservative", "Standard", "Sensitive", "Custom"} else "Custom")
+
+    def _detection_preset_changed(self, preset_name: str) -> None:
+        preset_values = {
+            "Conservative": (25, 40, 70, 35),
+            "Standard": (50, 50, 50, 50),
+            "Sensitive": (80, 70, 30, 80),
+        }
+        if preset_name in preset_values:
+            self._applying_detection_preset = True
+            for slider, spin, value in zip(
+                [self.red_sensitivity_slider, self.black_sensitivity_slider, self.haze_rejection_slider, self.cluster_sensitivity_slider],
+                [self.red_sensitivity_spin, self.black_sensitivity_spin, self.haze_rejection_spin, self.cluster_sensitivity_spin],
+                preset_values[preset_name],
+            ):
+                slider.setValue(value)
+                spin.setValue(value)
+            self._applying_detection_preset = False
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
+        self._current_detection_params()
+        self.update_selected_nucleus_panel()
+
+    def _detection_slider_changed(self) -> None:
+        if self._applying_detection_preset:
+            return
+        if self.red_sensitivity_combo.currentText() != "Custom":
+            blocker = QSignalBlocker(self.red_sensitivity_combo)
+            self.red_sensitivity_combo.setCurrentText("Custom")
+            del blocker
+        self.last_red_detection_stats = None
+        self.last_red_detection_nucleus_id = None
+        self._current_detection_params()
         self.update_selected_nucleus_panel()
 
     def _append_row(self, nucleus: NucleusCount) -> None:
@@ -684,6 +809,7 @@ class MainWindow(QMainWindow):
         self.selected_nucleus_id = None
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
+        self._apply_detection_settings_to_ui()
         self.refresh_table_from_project()
         self.viewer.draw_nuclei(self.project.nuclei, self.selected_nucleus_id)
         self.update_selected_nucleus_panel()

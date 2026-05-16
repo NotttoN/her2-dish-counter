@@ -2,7 +2,7 @@ import csv
 
 import pytest
 
-from her2dish.core.models import CaseProject, NucleusCount, RoiRectangle
+from her2dish.core.models import CaseProject, DetectionSettings, NucleusCount, RoiRectangle
 from her2dish.core.project_io import load_project, save_project
 from her2dish.core.exporters import export_csv, export_annotated_png
 from her2dish.core.scoring import calculate_score
@@ -37,7 +37,16 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
         NucleusCount(nucleus_id=1, x=100, y=120, her2_black=4, small_cluster_count=1, cep17_red=2),
         NucleusCount(nucleus_id=2, x=180, y=200, her2_black=2, manual_cluster_add=1, cep17_red=2, included=False),
     ]
-    project = CaseProject(case_id="c", specimen_id="s", image_path=str(image_path), roi=RoiRectangle(50, 60, 200, 120), nuclei=nuclei)
+    project = CaseProject(
+        case_id="c",
+        specimen_id="s",
+        image_path=str(image_path),
+        roi=RoiRectangle(50, 60, 200, 120),
+        nuclei=nuclei,
+        detection_settings=DetectionSettings(
+            preset="Custom", red_sensitivity=61, black_sensitivity=62, haze_rejection=63, cluster_sensitivity=64
+        ),
+    )
     score = calculate_score(project.nuclei)
     assert score.total_her2 == 10
     assert score.total_cep17 == 2
@@ -53,6 +62,11 @@ def test_manual_count_and_exports_with_source_image(tmp_path):
     assert rows[0]["effective_her2"] == "10"
     assert rows[0]["detected_black_dot_count"] == "0"
     assert rows[0]["detected_red_dot_count"] == "0"
+    assert rows[0]["black_cluster_review_candidate_count"] == "0"
+    assert rows[0]["detection_red_sensitivity"] == "61"
+    assert rows[0]["detection_black_sensitivity"] == "62"
+    assert rows[0]["detection_haze_rejection"] == "63"
+    assert rows[0]["detection_cluster_sensitivity"] == "64"
 
     png_path = tmp_path / "annotated.png"
     export_annotated_png(project, png_path)
