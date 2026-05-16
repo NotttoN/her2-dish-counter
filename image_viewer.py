@@ -167,12 +167,11 @@ class ImageViewer(QGraphicsView):
             *((candidate, "cyan") for candidate in nucleus.black_cluster_candidates),
             *((candidate, "magenta") for candidate in nucleus.red_dot_candidates),
         ]:
-            is_large_red = candidate.color_type == "large_red"
             is_cluster = candidate.color_type == "black_cluster_review"
-            radius = max(3.0, min(13.0 if is_cluster else 10.0 if is_large_red else 8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
+            radius = max(3.0, min(13.0 if is_cluster else 8.0, (float(candidate.area) ** 0.5) / 2.0 + 2.0))
             dot = QGraphicsEllipseItem(candidate.x - radius, candidate.y - radius, radius * 2.0, radius * 2.0)
-            pen = QPen(QColor("orange" if is_large_red else color_name), 3 if (is_large_red or is_cluster) else 2)
-            if is_large_red or is_cluster:
+            pen = QPen(QColor(color_name), 3 if is_cluster else 2)
+            if is_cluster:
                 pen.setStyle(Qt.PenStyle.DashLine)
             dot.setPen(pen)
             dot.setBrush(Qt.BrushStyle.NoBrush)

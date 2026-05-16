@@ -79,6 +79,7 @@ class ComponentDetectionStats:
     circularity_pass_components: int = 0
     roi_pass_components: int = 0
     detected_candidates: int = 0
+    # Backward-compatible legacy counter; new detection always reports 0.
     large_red_candidates: int = 0
     overlap_review_candidates: int = 0
     red_haze_rejected_components: int = 0
@@ -128,7 +129,7 @@ RED_SENSITIVITY_PRESETS: dict[str, DotDetectionParams] = {
     "Sensitive": DotDetectionParams(
         red_min_area=2.0,
         red_max_area=700.0,
-        red_hue_range=((0.0, 20.0), (125.0, 179.0)),
+        red_hue_range=((0.0, 18.0), (128.0, 179.0)),
         red_saturation_threshold=0.12,
         red_value_threshold=0.12,
         red_circularity_threshold=0.02,
@@ -177,11 +178,11 @@ def params_from_sliders(
         red_value_threshold=_lerp(0.28, 0.10, rt),
         red_min_area=_lerp(5.0, 1.0, rt),
         red_max_area=_lerp(180.0, 760.0, rt),
-        red_hue_range=((0.0, hue_edge), (magenta_start, 179.0)),
+        red_hue_range=((0.0, min(hue_edge, 18.0)), (max(magenta_start, 128.0), 179.0)),
         red_circularity_threshold=_lerp(0.25, 0.01, rt),
         red_large_min_area=_lerp(150.0, 100.0, rt),
         red_peak_min_distance=_lerp(6.0, 4.0, rt),
-        red_duplicate_merge_distance_px=_lerp(8.0, 5.0, rt),
+        red_duplicate_merge_distance_px=_lerp(8.0, 14.0, rt),
         black_darkness_threshold=black_darkness,
         black_threshold=int(round(black_darkness)),
         black_min_area=_lerp(12.0, 2.0, bt),
@@ -423,7 +424,6 @@ def _detect_red_components(
     area_pass_components = 0
     circularity_pass_components = 0
     roi_pass_components = 0
-    large_red_candidates = 0
     red_haze_rejected_components = 0
 
     for seed in list(mask):
@@ -459,12 +459,11 @@ def _detect_red_components(
         if haze_like or extreme_haze:
             red_haze_rejected_components += 1
             continue
+        metrics = _component_color_metrics(component, pixels, width, height)
+        if _is_black_dominant_red_component(metrics, params):
+            continue
         base_confidence = _red_confidence(component_pixels, params)
         confidence = max(0.0, min(1.0, base_confidence * (0.70 + 0.30 * min(1.0, circularity))))
-        is_large = area >= params.red_large_min_area or area > params.red_max_area or not circularity_passed
-        color_type = "large_red" if is_large else "red"
-        if color_type == "large_red":
-            large_red_candidates += 1
         candidates_by_component.append(
             (
                 component_id,
@@ -473,7 +472,7 @@ def _detect_red_components(
                     y=float(cy),
                     area=area,
                     confidence=confidence,
-                    color_type=color_type,
+                    color_type="red",
                 ),
             )
         )
@@ -489,7 +488,7 @@ def _detect_red_components(
         circularity_pass_components=circularity_pass_components,
         roi_pass_components=roi_pass_components,
         detected_candidates=len(candidates),
-        large_red_candidates=sum(1 for candidate in candidates if candidate.color_type == "large_red"),
+        large_red_candidates=0,
         overlap_review_candidates=0,
         red_haze_rejected_components=red_haze_rejected_components,
         merged_duplicate_red_candidates=merged_duplicate_red_candidates,
@@ -542,7 +541,7 @@ def _combine_red_candidates(first: DotCandidate, second: DotCandidate) -> DotCan
     y = (first.y * float(first.area) + second.y * float(second.area)) / total_area
     confidence_values = [value for value in (first.confidence, second.confidence) if value is not None]
     confidence = max(confidence_values) if confidence_values else None
-    color_type = "large_red" if "large_red" in {first.color_type, second.color_type} else "red"
+    color_type = "red"
     return DotCandidate(
         x=float(x),
         y=float(y),
@@ -639,6 +638,26 @@ def _component_color_metrics(
         "black_score": sum(black_scores) / total,
     }
 
+
+
+def _is_black_dominant_red_component(metrics: dict[str, float], params: DotDetectionParams) -> bool:
+    """Reject red-mask components whose surrounding signal is predominantly black.
+
+    Bright red/magenta components adjacent to black HER2 remain CEP17 candidates,
+    but dark components with weak red evidence are not allowed to become duplicate
+    CEP17 counts, especially under Sensitive/high-red-sensitivity settings.
+    """
+
+    red_ratio = metrics["red_ratio"]
+    dark_ratio = metrics["dark_ratio"]
+    red_score = metrics["red_score"]
+    black_score = metrics["black_score"]
+    sensitivity_factor = params.red_sensitivity / 100.0
+    min_red_ratio = _lerp(0.035, 0.055, sensitivity_factor)
+    min_red_score = _lerp(0.010, 0.018, sensitivity_factor)
+    if red_ratio < min_red_ratio or red_score < min_red_score:
+        return True
+    return dark_ratio > 0.78 and dark_ratio > red_ratio * 2.5 and black_score > red_score * 2.0
 
 def _component_mask(
     pixels: list[list[tuple[int, int, int]]],
@@ -764,6 +783,11 @@ def _is_red_candidate_pixel(r: int, g: int, b: int, params: DotDetectionParams) 
     if not any(start <= hue_opencv <= end for start, end in params.red_hue_range):
         return False
     if saturation < params.red_saturation_threshold or value < params.red_value_threshold:
+        return False
+
+    luminance = _luminance(r, g, b) / 255.0
+    red_chroma = r - max(g, b)
+    if luminance < 0.34 and red_chroma < 70 and b < g * 1.10:
         return False
 
     red_like = hue_opencv <= 20.0 and r >= g * 1.05 and r >= b * 0.70

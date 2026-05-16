@@ -201,6 +201,9 @@ class MainWindow(QMainWindow):
         preset_row.addWidget(self.red_sensitivity_combo)
         preset_row.addStretch(1)
         slider_panel.addLayout(preset_row)
+        self.detection_preset_note = QLabel()
+        self.detection_preset_note.setWordWrap(True)
+        slider_panel.addWidget(self.detection_preset_note)
         self.red_sensitivity_slider, self.red_sensitivity_spin = self._make_detection_slider(
             "Red sensitivity", self.project.detection_settings.red_sensitivity, slider_panel
         )
@@ -399,11 +402,8 @@ class MainWindow(QMainWindow):
             return
         nucleus.her2_black = len(nucleus.black_dot_candidates)
         nucleus.cep17_red = len(nucleus.red_dot_candidates)
-        large_red_count = self._large_red_candidate_count(nucleus)
         self._refresh_after_selected_nucleus_edit(row)
         review_notes = []
-        if large_red_count:
-            review_notes.append("large red candidate included as 1; please review manually")
         if nucleus.black_cluster_candidates:
             review_notes.append("black cluster review candidates not applied")
         review_note = f"; {'; '.join(review_notes)}" if review_notes else ""
@@ -638,7 +638,6 @@ class MainWindow(QMainWindow):
                     f"Detected HER2 candidates: {len(nucleus.black_dot_candidates)}",
                     f"Detected CEP17 candidates: {len(nucleus.red_dot_candidates)}",
                     f"Black cluster review candidates: {len(nucleus.black_cluster_candidates)}",
-                    f"Large red candidates: {self._large_red_candidate_count(nucleus)}",
                     f"Red haze rejected components: {self._red_haze_rejected_count(nucleus)}",
                     *red_debug_lines,
                 ]
@@ -647,9 +646,9 @@ class MainWindow(QMainWindow):
         self.dot_candidates_label.setText(
             f"Dot candidates for selected nucleus: "
             f"HER2 black={len(nucleus.black_dot_candidates)}, CEP17 red={len(nucleus.red_dot_candidates)}, "
-            f"cluster review={len(nucleus.black_cluster_candidates)} "
-            f"(large red={self._large_red_candidate_count(nucleus)}). "
-            "Red signals inside or near black clusters are included as CEP17 candidates when red/magenta signal is detected. "
+            f"cluster review={len(nucleus.black_cluster_candidates)}. "
+            "Each accepted red connected component is one CEP17 candidate regardless of size or shape. "
+            "Red signals inside or near black clusters are included only when clear red/magenta signal is detected. "
             "Black cluster candidates are not automatically applied; please review and enter S/L-cluster manually if appropriate."
         )
 
@@ -676,14 +675,10 @@ class MainWindow(QMainWindow):
             f"Red components after area filter: {stats.area_pass_components}",
             f"Red components after circularity filter: {stats.circularity_pass_components}",
             f"Final CEP17 candidates: {stats.final_cep17_candidates}",
-            f"Large red candidates: {stats.large_red_candidates}",
             f"Red haze rejected components: {stats.red_haze_rejected_components}",
             f"Merged duplicate red candidates: {stats.merged_duplicate_red_candidates}",
             "Note: Final CEP17 candidates are applied; black cluster review candidates are display-only.",
         ]
-
-    def _large_red_candidate_count(self, nucleus: NucleusCount) -> int:
-        return sum(1 for candidate in nucleus.red_dot_candidates if candidate.color_type == "large_red")
 
     def _red_haze_rejected_count(self, nucleus: NucleusCount) -> int:
         if self.last_red_detection_stats is None or self.last_red_detection_nucleus_id != nucleus.nucleus_id:
@@ -720,6 +715,7 @@ class MainWindow(QMainWindow):
             del spin_blocker
             del slider_blocker
         self.red_sensitivity_combo.setCurrentText(settings.preset if settings.preset in {"Conservative", "Standard", "Sensitive", "Custom"} else "Custom")
+        self._update_detection_preset_note(self.red_sensitivity_combo.currentText())
 
     def _detection_preset_changed(self, preset_name: str) -> None:
         preset_values = {
@@ -739,8 +735,23 @@ class MainWindow(QMainWindow):
             self._applying_detection_preset = False
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
+        self._update_detection_preset_note(preset_name)
         self._current_detection_params()
         self.update_selected_nucleus_panel()
+
+
+    def _update_detection_preset_note(self, preset_name: str) -> None:
+        if preset_name == "Sensitive":
+            self.detection_preset_note.setText(
+                "Sensitive may over-detect CEP17 and may count black-adjacent signals as red. "
+                "Use for exploratory review only."
+            )
+        elif preset_name == "Standard":
+            self.detection_preset_note.setText("Standard is the recommended preset for routine review.")
+        elif preset_name == "Conservative":
+            self.detection_preset_note.setText("Conservative reduces red sensitivity for stricter CEP17 review.")
+        else:
+            self.detection_preset_note.setText("Custom detection settings are active.")
 
     def _detection_slider_changed(self) -> None:
         if self._applying_detection_preset:
@@ -748,9 +759,11 @@ class MainWindow(QMainWindow):
         if self.red_sensitivity_combo.currentText() != "Custom":
             blocker = QSignalBlocker(self.red_sensitivity_combo)
             self.red_sensitivity_combo.setCurrentText("Custom")
+            self._update_detection_preset_note("Custom")
             del blocker
         self.last_red_detection_stats = None
         self.last_red_detection_nucleus_id = None
+        self._update_detection_preset_note(preset_name)
         self._current_detection_params()
         self.update_selected_nucleus_panel()
 
